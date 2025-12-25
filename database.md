@@ -193,6 +193,8 @@ Used in NoSQL databases prioritizing availability over consistency.
 
 ## Transactions & Isolation Levels
 
+[https://www.baeldung.com/spring-transactional-propagation-isolation](https://www.baeldung.com/spring-transactional-propagation-isolation)
+
 <a id="q70"></a>
 ### Q70: What is a database transaction?
 **Answer:**
