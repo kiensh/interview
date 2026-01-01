@@ -11,10 +11,12 @@ A comprehensive collection of Java and Spring Framework interview questions orga
 | [concurrency.md](concurrency.md) | Threads, Synchronization, Locks, Executors, Atomic, Memory | 16 |
 | [jvm.md](jvm.md) | JVM Architecture, ClassLoader, Memory Areas, Execution Engine, GC, Security | 27 |
 | [modern-java.md](modern-java.md) | Streams, Functional Programming, Java 8/11/17 Features | 11 |
-| [spring-core.md](spring-core.md) | DI, IoC, Annotations, Boot, Bean Lifecycle, AOP, Transactions, Testing | 23 |
+| [spring-core.md](spring-core.md) | DI, IoC, Annotations, Boot, Bean Lifecycle, AOP, Transactions | 20 |
 | [spring-web-data.md](spring-web-data.md) | JPA, JDBC, Hibernate, WebFlux, Security | 16 |
+| [testing.md](testing.md) | JUnit, Mockito, Spring Boot Testing, Test Slices | 15 |
+| [tools.md](tools.md) | Maven, Gradle, Logging (SLF4J/Logback), Task Scheduling | 10 |
 
-**Total: 132 Questions**
+**Total: 154 Questions**
 
 ---
 
@@ -55,6 +57,17 @@ A comprehensive collection of Java and Spring Framework interview questions orga
 - **AOP**: Aspects, Pointcuts, Advice types
 - **Data**: JPA repositories, JdbcTemplate, N+1 problem
 - **Web**: WebFlux (Mono/Flux), Security, JWT, CORS
+
+### Testing
+- Testing pyramid, Mocking vs Stubbing
+- JUnit 5 (annotations, lifecycle, parameterized tests, assertions)
+- Mockito (@Mock, @InjectMocks, verify, ArgumentCaptor)
+- Spring Boot Test Slices (@WebMvcTest, @DataJpaTest, @SpringBootTest)
+
+### Tools & DevOps
+- Build tools (Maven vs Gradle, dependencies, plugins)
+- Logging (SLF4J, Logback, log levels, centralized logging)
+- Task Scheduling (@Scheduled, ShedLock, distributed locks)
 
 ---
 

@@ -1,4 +1,4 @@
-# Spring Core (DI, IoC, Boot, AOP, Transactions)
+# Spring Core (DI, IoC, Boot, Bean, AOP, Transactions)
 
 ## Table of Contents
 
@@ -33,11 +33,6 @@
 - [Q18: How does @Transactional work?](#q18)
 - [Q19: What are Transaction Propagation levels?](#q19)
 - [Q20: Why might @Transactional not work?](#q20)
-
-### Testing
-- [Q21: What is the difference between @WebMvcTest and @SpringBootTest?](#q21)
-- [Q22: How do you test a REST controller with MockMvc?](#q22)
-- [Q23: What is @DataJpaTest used for?](#q23)
 
 ---
 
@@ -400,67 +395,6 @@ public void transferMoney(Long fromId, Long toId, BigDecimal amount) {
 2. **Not public**: Spring proxies only work with public methods
 3. **Wrong exception**: By default, only unchecked exceptions roll back
 4. **Proxy mode**: JDK proxy requires interface, CGLIB for classes
-
----
-
-## Testing
-
-<a id="q21"></a>
-### Q21: What is the difference between @WebMvcTest and @SpringBootTest?
-**Answer:**
-| @WebMvcTest | @SpringBootTest |
-|-------------|-----------------|
-| Loads only web layer | Loads full application context |
-| Fast, focused | Slower, comprehensive |
-| Auto-configures MockMvc | Need to configure MockMvc |
-| Tests controllers only | Integration tests |
-| Dependencies must be mocked | Can use real dependencies |
-
-<a id="q22"></a>
-### Q22: How do you test a REST controller with MockMvc?
-**Answer:**
-```java
-@WebMvcTest(UserController.class)
-class UserControllerTest {
-    @Autowired
-    private MockMvc mockMvc;
-    
-    @MockBean
-    private UserService userService;
-    
-    @Test
-    void shouldReturnUser() throws Exception {
-        when(userService.findById(1L)).thenReturn(new User(1L, "John"));
-        
-        mockMvc.perform(get("/users/1"))
-            .andExpect(status().isOk())
-            .andExpect(jsonPath("$.name").value("John"));
-    }
-}
-```
-
-<a id="q23"></a>
-### Q23: What is @DataJpaTest used for?
-**Answer:**
-- Tests JPA repositories
-- Configures in-memory database
-- Scans for @Entity classes
-- Transactions are rolled back after each test
-
-```java
-@DataJpaTest
-class UserRepositoryTest {
-    @Autowired
-    private UserRepository userRepository;
-    
-    @Test
-    void shouldFindByEmail() {
-        userRepository.save(new User("test@email.com"));
-        Optional<User> found = userRepository.findByEmail("test@email.com");
-        assertThat(found).isPresent();
-    }
-}
-```
 
 ---
 
