@@ -8,7 +8,7 @@ A comprehensive collection of Java and Spring Framework interview questions orga
 |------|--------|-----------|
 | [core.md](core.md) | OOP, Interfaces, Keywords, Generics, Exceptions, Serialization, Immutability, SOLID/GRASP | 29 |
 | [collections.md](collections.md) | ArrayList, HashMap, TreeMap, HashSet, Collections Internals | 10 |
-| [concurrency.md](concurrency.md) | Threads, Synchronization, Locks, Executors, Atomic, Memory | 16 |
+| [concurrency.md](concurrency.md) | Threads, Synchronization, Thread Pools, Executors, Atomic, Memory | 24 |
 | [jvm.md](jvm.md) | JVM Architecture, ClassLoader, Memory Areas, Execution Engine, GC, Security | 27 |
 | [modern-java.md](modern-java.md) | Streams, Functional Programming, Java 8/11/17 Features | 11 |
 | [spring-core.md](spring-core.md) | DI, IoC, Annotations, Boot, Bean Lifecycle, AOP, Transactions | 20 |
@@ -16,7 +16,7 @@ A comprehensive collection of Java and Spring Framework interview questions orga
 | [testing.md](testing.md) | JUnit, Mockito, Spring Boot Testing, Test Slices | 15 |
 | [tools.md](tools.md) | Maven, Gradle, Logging (SLF4J/Logback), Task Scheduling | 10 |
 
-**Total: 154 Questions**
+**Total: 162 Questions**
 
 ---
 
@@ -35,7 +35,9 @@ A comprehensive collection of Java and Spring Framework interview questions orga
 
 ### Concurrency
 - Thread lifecycle, Synchronized vs Volatile
-- ReentrantLock, ReadWriteLock
+- ReentrantLock, ReadWriteLock, Deadlock prevention
+- Thread Pools (Fixed, Cached, Scheduled, ForkJoin)
+- ThreadPoolExecutor parameters, Rejection policies
 - ExecutorService, CountDownLatch, Semaphore
 - Atomic classes, CAS, Memory (Heap vs Stack)
 
