@@ -15,3 +15,7 @@ Thumbs.db
 
 # pdf files
 *.pdf
+
+# AI tools
+.cursor
+.claude
