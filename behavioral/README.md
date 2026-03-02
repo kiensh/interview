@@ -7,8 +7,9 @@ A comprehensive collection of behavioral interview questions with sample answers
 | File | Topics | Questions |
 |------|--------|-----------|
 | [behavioral-questions.md](behavioral-questions.md) | Work pressure, Conflict resolution, Teamwork, Leadership, Learning | 25 |
+| [microsoft-manager-round.md](microsoft-manager-round.md) | Microsoft Growth Mindset, Personalized STAR stories, Global teams, Reverse questions | 19 |
 
-**Total: ~25 Questions**
+**Total: ~44 Questions**
 
 ---
 

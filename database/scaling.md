@@ -4,31 +4,33 @@
 
 ## Table of Contents
 
-### [Partitioning](#partitioning)
+### [Intra-Node Data Distribution](#intra-node-data-distribution)
 - [Q1: What is database partitioning and why use it?](#q1)
 - [Q2: What are the different types of partitioning?](#q2)
-- [Q3: What is the difference between partitioning and sharding?](#q3)
 
-### [Sharding](#sharding)
+### [Cross-Node Distribution](#cross-node-distribution)
+- [Q3: What is the difference between partitioning and sharding?](#q3)
 - [Q4: What is database sharding?](#q4)
 
-### [Replication](#replication)
+### [Replication & Availability](#replication--availability)
 - [Q5: What is database replication?](#q5)
 
 ---
 
-## Partitioning
+## Intra-Node Data Distribution
 
 <a id="q1"></a>
 ### Q1: What is database partitioning and why use it?
 **Answer:**
-Partitioning divides a large table into smaller, manageable pieces (partitions) while appearing as a single table to applications.
+Partitioning splits one logical table into smaller physical segments (partitions), typically on the same database cluster, while preserving one table interface for applications.
 
 **Benefits:**
-1. **Improved query performance**: Partition pruning skips irrelevant partitions
-2. **Easier maintenance**: Archive/drop old partitions without affecting others
-3. **Parallel operations**: Operations can run on partitions simultaneously
-4. **Better I/O distribution**: Spread data across storage devices
+1. **Partition pruning**: optimizer reads only relevant partitions.
+2. **Operational simplicity**: archive/drop old data partition-by-partition.
+3. **Faster maintenance**: vacuum/reindex/analyze can be partition-scoped.
+4. **Improved manageability**: avoids very large monolithic table hotspots.
+
+**What partitioning does not do by itself:** it does not automatically solve all scaling limits or remove need for good indexing.
 
 ```sql
 -- PostgreSQL partitioned table example
@@ -51,16 +53,18 @@ SELECT * FROM orders WHERE order_date = '2024-06-15';
 -- Only scans orders_2024 partition
 ```
 
+**Interview pitfall to mention:** if query filters do not include partition key (or predicate is not sargable), pruning may not happen and performance gains disappear.
+
 <a id="q2"></a>
 ### Q2: What are the different types of partitioning?
 **Answer:**
 
-| Type | Description | Use Case |
-|------|-------------|----------|
-| **Range** | Based on value ranges | Time-series data, dates |
-| **List** | Based on discrete values | Geographic regions, categories |
-| **Hash** | Based on hash of column | Even distribution, no natural range |
-| **Composite** | Combination of above | Complex requirements |
+| Type | Description | Best when | Typical downside |
+|------|-------------|-----------|------------------|
+| **Range** | Partition by value intervals | Time-series data, retention windows | Skew if one range is much hotter |
+| **List** | Partition by discrete sets | Regions, tenant tiers, categories | Requires manual mapping updates |
+| **Hash** | Partition by hash value | Even write/read distribution | Harder to prune for range queries |
+| **Composite** | Mix strategies (e.g., range + hash) | High scale with mixed access patterns | More operational complexity |
 
 **Range Partitioning:**
 ```sql
@@ -104,6 +108,15 @@ CREATE TABLE user_sessions_2 PARTITION OF user_sessions FOR VALUES WITH (MODULUS
 CREATE TABLE user_sessions_3 PARTITION OF user_sessions FOR VALUES WITH (MODULUS 4, REMAINDER 3);
 ```
 
+**Design advice:**
+- Pick a partition key aligned with your most common high-volume filters.
+- Keep partition count reasonable; too many small partitions increases planner overhead.
+- Plan lifecycle automation (create next partition, archive/drop old).
+
+---
+
+## Cross-Node Distribution
+
 <a id="q3"></a>
 ### Q3: What is the difference between partitioning and sharding?
 **Answer:**
@@ -117,20 +130,22 @@ CREATE TABLE user_sessions_3 PARTITION OF user_sessions FOR VALUES WITH (MODULUS
 | Vertical scalability | Horizontal scalability |
 | Single point of failure | Distributed, more resilient |
 
-```
-Partitioning (Single Server):
-┌─────────────────────────────┐
-│     Single Database         │
-│  ┌─────┬─────┬─────┬─────┐ │
-│  │ P1  │ P2  │ P3  │ P4  │ │
-│  └─────┴─────┴─────┴─────┘ │
-└─────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph partitioningSingleNode [Partitioning: Single Database Node]
+        appClient[Application] --> singleDb[(Single DB)]
+        singleDb --> part1[Partition P1]
+        singleDb --> part2[Partition P2]
+        singleDb --> part3[Partition P3]
+        singleDb --> part4[Partition P4]
+    end
 
-Sharding (Multiple Servers):
-┌──────────┐  ┌──────────┐  ┌──────────┐
-│ Server 1 │  │ Server 2 │  │ Server 3 │
-│ Shard 1  │  │ Shard 2  │  │ Shard 3  │
-└──────────┘  └──────────┘  └──────────┘
+    subgraph shardingMultiNode [Sharding: Multiple Database Nodes]
+        appClient2[Application] --> shardRouter[Shard Router]
+        shardRouter --> shardA[(Shard A)]
+        shardRouter --> shardB[(Shard B)]
+        shardRouter --> shardC[(Shard C)]
+    end
 ```
 
 **When to use each:**
@@ -139,12 +154,10 @@ Sharding (Multiple Servers):
 
 ---
 
-## Sharding
-
 <a id="q4"></a>
 ### Q4: What is database sharding?
 **Answer:**
-Sharding horizontally partitions data across multiple databases.
+Sharding distributes one logical dataset across multiple independent database instances to scale writes, storage, and throughput beyond one node.
 
 **Strategies:**
 1. **Range-based**: Shard by date range, ID range
@@ -157,31 +170,52 @@ Sharding horizontally partitions data across multiple databases.
 - Maintaining referential integrity
 - Increased complexity
 
+```mermaid
+flowchart LR
+    request[Incoming Request] --> route{Compute Shard Key}
+    route -->|A-M| shard1[(Shard 1)]
+    route -->|N-Z| shard2[(Shard 2)]
+    shard1 --> result1[Partial Result]
+    shard2 --> result2[Partial Result]
 ```
-Shard 1: Users A-M
-Shard 2: Users N-Z
-```
+
+**Production considerations:**
+- Choose a shard key with high cardinality and even distribution.
+- Avoid "hot shards" (for example sequential IDs without hashing).
+- Plan resharding early (dual writes, backfill, cutover strategy).
+- Use global IDs and avoid cross-shard transactions where possible.
 
 ---
 
-## Replication
+## Replication & Availability
 
 <a id="q5"></a>
 ### Q5: What is database replication?
 **Answer:**
-Replication copies data across multiple database servers.
+Replication copies data from one primary source to one or more replicas for high availability, read scaling, and disaster recovery.
 
 **Types:**
-1. **Master-Slave**: Writes to master, reads from slaves
-2. **Master-Master**: Writes to any master
-3. **Synchronous**: Waits for all replicas
-4. **Asynchronous**: Doesn't wait (may have lag)
+1. **Primary-Replica**: writes to primary, reads can go to replicas.
+2. **Multi-primary**: writes accepted on multiple nodes (conflict handling required).
+3. **Synchronous**: commit waits for replica ACK (stronger durability, higher latency).
+4. **Asynchronous**: primary commits without waiting (faster, but possible replica lag/data loss window).
 
 **Benefits:**
 - High availability
 - Read scalability
 - Disaster recovery
 - Geographic distribution
+
+```mermaid
+flowchart LR
+    appWrite[Write Traffic] --> primary[(Primary)]
+    primary -->|WAL/Binlog| replica1[(Replica 1)]
+    primary -->|WAL/Binlog| replica2[(Replica 2)]
+    appRead[Read Traffic] --> replica1
+    appRead --> replica2
+```
+
+**Interview nuance:** replication improves availability, but it is not a substitute for backups. Logical mistakes (for example accidental delete) replicate too.
 
 ---
 

@@ -25,54 +25,92 @@
 **Answer:**
 | ArrayList | LinkedList |
 |-----------|------------|
-| Backed by dynamic array | Backed by doubly-linked list |
-| O(1) random access | O(n) random access |
-| O(n) insertion/deletion in middle | O(1) insertion/deletion (if node known) |
-| Better for read-heavy operations | Better for write-heavy operations |
-| Less memory overhead | More memory (stores next/prev pointers) |
+| Backed by dynamic array | Backed by doubly-linked nodes |
+| O(1) random access by index | O(n) random access |
+| Appending is O(1) amortized | Appending/removing at ends is O(1) |
+| Insert/remove in middle is O(n) (shifts) | Insert/remove near known node is O(1), but lookup is O(n) |
+| Better cache locality, usually faster in practice | Higher per-element memory overhead |
+
+**Deep-dive trade-off:**  
+`LinkedList` is often chosen for "fast inserts", but in real code you usually pay O(n) traversal before insertion. For most workloads, `ArrayList` wins because of CPU cache friendliness.
 
 <a id="q2"></a>
 ### Q2: What is the difference between HashMap and TreeMap?
 **Answer:**
 | HashMap | TreeMap |
 |---------|---------|
-| O(1) for get/put operations | O(log n) for get/put operations |
-| No ordering guaranteed | Keys are sorted in natural order |
-| Allows one null key | Does not allow null keys |
-| Uses hashing | Uses Red-Black tree |
-| Better for most use cases | Use when sorted order is needed |
+| Hash-table buckets | Red-Black Tree |
+| Average O(1) get/put | O(log n) get/put |
+| No key order guarantee | Sorted by natural order or `Comparator` |
+| Allows one null key | Null key not allowed (natural ordering path) |
+| Best for fast key lookup | Best for ordered queries (`floorKey`, `subMap`) |
+
+Use `TreeMap` when you need sorted traversal/range queries; otherwise `HashMap` is usually the default.
 
 <a id="q3"></a>
 ### Q3: What is the difference between HashSet, LinkedHashSet, and TreeSet?
 **Answer:**
-- **HashSet**: No ordering, O(1) operations, allows null
-- **LinkedHashSet**: Maintains insertion order, O(1) operations
-- **TreeSet**: Sorted order, O(log n) operations, no null allowed
+| Set Type | Ordering | Complexity | Null | Backing structure |
+|----------|----------|------------|------|-------------------|
+| `HashSet` | Unordered | O(1) average | One null | `HashMap` |
+| `LinkedHashSet` | Insertion order | O(1) average | One null | `LinkedHashMap` |
+| `TreeSet` | Sorted | O(log n) | Not allowed with natural ordering | `TreeMap` |
+
+**When to pick which:**
+- `HashSet`: fastest membership checks.
+- `LinkedHashSet`: deduplicate while preserving insertion order.
+- `TreeSet`: need sorted + navigational operations (`ceiling`, `floor`).
 
 <a id="q4"></a>
 ### Q4: What happens when two keys have the same hashCode in HashMap?
 **Answer:**
-When two keys have the same hashCode (collision):
-1. Both entries are stored in the same bucket
-2. Before Java 8: Uses LinkedList to chain entries
-3. Java 8+: Uses LinkedList initially, converts to balanced tree (Red-Black) when bucket size exceeds 8 (TREEIFY_THRESHOLD)
-4. To find correct value, `equals()` is called on each entry in the bucket
+A hash collision means multiple keys map to the same bucket index.
+
+HashMap resolution flow:
+1. Compute spread hash (`h ^ (h >>> 16)`).
+2. Pick bucket via bit mask (`(n - 1) & hash`).
+3. If bucket occupied, compare keys via `equals()`.
+4. Chain in linked bin; in Java 8+, convert to tree bin when collision depth crosses threshold.
+
+Important Java 8+ thresholds:
+- `TREEIFY_THRESHOLD = 8`
+- `UNTREEIFY_THRESHOLD = 6`
+- `MIN_TREEIFY_CAPACITY = 64` (otherwise map resizes first instead of treeifying)
+
+**Why this matters:** even with many collisions, worst-case operations improve from O(n) to O(log n) once treeified.
 
 <a id="q5"></a>
 ### Q5: Why should you override both hashCode() and equals()?
 **Answer:**
-The contract states:
-- If two objects are equal (`equals()` returns true), they **must** have the same hashCode
-- If hashCodes are equal, objects may or may not be equal
+`HashMap`/`HashSet` rely on both methods:
+- `hashCode()` chooses the bucket.
+- `equals()` confirms logical key equality inside that bucket.
 
-If you override only `equals()`:
+Contract:
+- If `a.equals(b)` is true, `a.hashCode() == b.hashCode()` must be true.
+- Reverse is not required (collisions are allowed).
+
 ```java
-Map<Person, String> map = new HashMap<>();
-Person p1 = new Person("John");
-Person p2 = new Person("John");
-map.put(p1, "Engineer");
-map.get(p2); // Returns null! Different hashCode, wrong bucket
+final class Person {
+    private final String email;
+
+    Person(String email) { this.email = email; }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Person p)) return false;
+        return Objects.equals(email, p.email);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(email);
+    }
+}
 ```
+
+**Pitfall:** mutable fields in `hashCode()/equals()` can make map entries "disappear" after mutation.
 
 ---
 
@@ -81,207 +119,163 @@ map.get(p2); // Returns null! Different hashCode, wrong bucket
 <a id="q6"></a>
 ### Q6: How does ArrayList work internally?
 **Answer:**
-ArrayList is backed by a dynamically resizing array.
+`ArrayList` stores elements in an `Object[]` and tracks logical size separately.
 
-**Structure:**
+Key defaults (OpenJDK):
+- No-arg constructor starts with a shared empty array (lazy allocation).
+- First insertion expands to default capacity `10`.
+- Growth factor is roughly `1.5x` when resize is needed.
+
 ```java
 public class ArrayList<E> {
-    transient Object[] elementData;  // Backing array
-    private int size;                // Number of elements
-    private static final int DEFAULT_CAPACITY = 10;
+    transient Object[] elementData;
+    private int size;
 }
 ```
 
-**Key operations:**
+Growth behavior (OpenJDK): when full, capacity grows roughly by 1.5x.
 
-| Operation | Time Complexity | Description |
-|-----------|-----------------|-------------|
-| get(index) | O(1) | Direct array access |
-| add(element) | O(1) amortized | May trigger resize |
-| add(index, element) | O(n) | Shifts elements right |
-| remove(index) | O(n) | Shifts elements left |
-| contains(element) | O(n) | Linear search |
-
-**Resizing mechanism:**
 ```java
-// When array is full:
-// 1. Create new array with 1.5x capacity
-// 2. Copy all elements to new array
-private void grow() {
-    int newCapacity = oldCapacity + (oldCapacity >> 1);  // 1.5x
-    elementData = Arrays.copyOf(elementData, newCapacity);
-}
+int newCapacity = oldCapacity + (oldCapacity >> 1);
 ```
 
-**Memory layout:**
+```mermaid
+flowchart LR
+  listObj["ArrayList(size=3)"] --> backing["elementData[]"]
+  backing --> slot0["[0]=obj0"]
+  backing --> slot1["[1]=obj1"]
+  backing --> slot2["[2]=obj2"]
+  backing --> slot3["[3]=null"]
+  backing --> slot4["[4]=null"]
 ```
-ArrayList object:
-┌─────────────────┐
-│ elementData ────┼──► [obj0][obj1][obj2][null][null][null]
-│ size: 3         │
-└─────────────────┘
-```
+
+Complexity caveats:
+- `add(e)` is O(1) amortized, but resize step is O(n).
+- `add(index, e)` and `remove(index)` shift elements (O(n)).
+- Iterator is fail-fast (best-effort) via `modCount`.
 
 <a id="q7"></a>
 ### Q7: How does HashMap work internally?
 **Answer:**
-HashMap uses an array of buckets (nodes) with hash-based indexing.
+`HashMap` uses an array of buckets (`Node[] table`). Each bucket can hold:
+- single node,
+- linked chain of nodes,
+- red-black tree bin (high collision case).
 
-**Structure (Java 8+):**
+Core fields:
 ```java
-public class HashMap<K,V> {
-    transient Node<K,V>[] table;     // Bucket array
-    int threshold;                    // Capacity * loadFactor
-    final float loadFactor;           // Default 0.75
-    static final int DEFAULT_INITIAL_CAPACITY = 16;
-    static final int TREEIFY_THRESHOLD = 8;  // Convert to tree
-}
+transient Node<K,V>[] table;
+int threshold;          // capacity * loadFactor
+final float loadFactor; // default 0.75
 ```
 
-**How put() works:**
-```
-1. Calculate hash: hash = key.hashCode() ^ (key.hashCode() >>> 16)
-2. Find bucket index: index = hash & (table.length - 1)
-3. If bucket empty: create new Node
-4. If key exists: update value
-5. If collision: LinkedList until 8 nodes, then Red-Black Tree
-6. If size > threshold: resize (double capacity)
+Key defaults (no-arg constructor):
+- `defaultInitialCapacity = 16`
+- `defaultLoadFactor = 0.75`
+- `defaultResizeThreshold = 12` (computed as `16 * 0.75`)
+- Treeification context: `TREEIFY_THRESHOLD = 8`, `UNTREEIFY_THRESHOLD = 6`, `MIN_TREEIFY_CAPACITY = 64`
+
+Put flow:
+1. Compute spread hash.
+2. Find index using bitmask.
+3. Insert/update in bin.
+4. Resize if `size > threshold`.
+
+```mermaid
+flowchart TD
+  defaults["defaults: initCapacity=16, loadFactor=0.75, resizeThreshold=12"] --> putCall["put(key,value)"]
+  putCall --> calcHash["spread hash"]
+  calcHash --> idx["index = (n-1) & hash"]
+  idx --> emptyCheck{"bucket empty?"}
+  emptyCheck -->|Yes| addNode["insert node"]
+  emptyCheck -->|No| walkBin["scan chain/tree by equals"]
+  walkBin --> updateOrAppend["update existing or append new"]
+  updateOrAppend --> treeifyCheck{"binSize >= 8 and capacity >= 64?"}
+  treeifyCheck -->|Yes| treeify["convert to tree bin"]
+  treeifyCheck -->|No| resizeCheck
+  addNode --> resizeCheck{"size > threshold?"}
+  resizeCheck -->|Yes| resize["resize table x2, rehash bins"]
+  resizeCheck -->|No| done["done"]
 ```
 
-**Visual representation:**
-```
-HashMap (capacity=16, loadFactor=0.75):
-┌────┬────┬────┬────┬────┬────┬────┬────┐
-│ 0  │ 1  │ 2  │ 3  │ 4  │ 5  │ 6  │... │
-└────┴────┴────┴────┴────┴────┴────┴────┘
-  │         │
-  ▼         ▼
-[K,V]     [K,V] → [K,V] → [K,V]  (LinkedList for collisions)
-            │
-            ▼ (if > 8 nodes)
-          [Tree]  (Red-Black Tree)
-```
-
-**Time complexities:**
-| Operation | Average | Worst (many collisions) |
-|-----------|---------|------------------------|
-| get() | O(1) | O(log n) with tree |
-| put() | O(1) | O(log n) with tree |
-| containsKey() | O(1) | O(log n) with tree |
+**Performance note:** good key hash distribution is critical; poor hash functions increase collisions and latency variance.
 
 <a id="q8"></a>
 ### Q8: How does ConcurrentHashMap work internally?
 **Answer:**
-ConcurrentHashMap provides thread-safe operations without locking the entire map.
-
-**Java 8+ implementation:**
-- Uses CAS (Compare-And-Swap) for updates
-- Synchronized blocks only on individual buckets
-- No locking for read operations (volatile reads)
+`ConcurrentHashMap` (Java 8+) avoids whole-map locks:
+- Reads are mostly non-blocking (volatile/atomic reads).
+- Writes use CAS where possible, then synchronize at bin level when contended.
+- Supports lock-free style atomic APIs (`compute`, `merge`, `putIfAbsent`).
 
 ```java
-ConcurrentHashMap<String, Integer> map = new ConcurrentHashMap<>();
-
-// Atomic operations
-map.putIfAbsent("key", 1);
-map.computeIfAbsent("key", k -> expensiveComputation());
-map.merge("key", 1, Integer::sum);  // Atomic increment
-
-// Safe iteration (weakly consistent)
-for (Map.Entry<String, Integer> entry : map.entrySet()) {
-    // Won't throw ConcurrentModificationException
-}
+ConcurrentHashMap<String, Integer> counters = new ConcurrentHashMap<>();
+counters.merge("ok", 1, Integer::sum); // atomic update
 ```
 
-**Comparison:**
-| Feature | HashMap + synchronized | ConcurrentHashMap |
-|---------|------------------------|-------------------|
-| Lock granularity | Entire map | Per-bucket |
-| Read performance | Blocked | Lock-free |
-| Null keys/values | Allowed | NOT allowed |
-| Atomic operations | No | Yes |
+Internal behavior highlights:
+- No `null` keys or values (avoids ambiguity in concurrent reads).
+- Buckets can become tree bins like HashMap under heavy collisions.
+- Resizing is cooperative: multiple threads help transfer buckets.
+
+**Pitfall:** `size()` under contention may be approximate during concurrent updates; avoid assuming strict snapshot semantics without external coordination.
 
 <a id="q9"></a>
 ### Q9: How does LinkedList work internally?
 **Answer:**
-LinkedList is a doubly-linked list implementation.
+`LinkedList` is a doubly-linked list with `first` and `last` pointers.
 
-**Structure:**
 ```java
-public class LinkedList<E> {
-    transient Node<E> first;  // Head pointer
-    transient Node<E> last;   // Tail pointer
-    transient int size;
-    
-    private static class Node<E> {
-        E item;
-        Node<E> next;
-        Node<E> prev;
-    }
+private static class Node<E> {
+    E item;
+    Node<E> next;
+    Node<E> prev;
 }
 ```
 
-**Visual representation:**
-```
-first                                    last
-  │                                       │
-  ▼                                       ▼
-┌────────┐    ┌────────┐    ┌────────┐
-│ null ← │ ←─ │   ←    │ ←─ │   ←    │
-│ item   │    │ item   │    │ item   │
-│   → ───│ ─► │   →  ──│ ─► │ → null │
-└────────┘    └────────┘    └────────┘
+```mermaid
+flowchart LR
+  firstNode["first"] --> nodeA["NodeA(item)"]
+  nodeA --> nodeB["NodeB(item)"]
+  nodeB --> nodeC["NodeC(item)"]
+  nodeC --> lastNode["last"]
 ```
 
-**Time complexities:**
-| Operation | Time |
-|-----------|------|
-| addFirst() / addLast() | O(1) |
-| get(index) | O(n) |
-| add(index, element) | O(n) |
-| removeFirst() / removeLast() | O(1) |
+Operational behavior:
+- `addFirst/addLast/removeFirst/removeLast`: O(1)
+- `get(index)` and indexed insert/remove: O(n)
+- Iterator removal is efficient once positioned at node
+
+Use `LinkedList` mainly when deque-style operations dominate; for index-heavy access, prefer `ArrayList`.
 
 <a id="q10"></a>
 ### Q10: How does TreeMap work internally?
 **Answer:**
-TreeMap is based on a Red-Black Tree, maintaining sorted order of keys.
+`TreeMap` is implemented as a Red-Black Tree (self-balancing BST).
 
-**Structure:**
-```java
-public class TreeMap<K,V> {
-    private transient Entry<K,V> root;
-    private final Comparator<? super K> comparator;
-    
-    static final class Entry<K,V> {
-        K key;
-        V value;
-        Entry<K,V> left, right, parent;
-        boolean color;  // RED or BLACK
-    }
-}
+Red-Black properties keep height bounded (~`log n`), so `get/put/remove` remain O(log n).
+
+```mermaid
+flowchart TD
+  root["root(black)"] --> left["left(red/black)"]
+  root --> right["right(red/black)"]
+  left --> leftLeft["..."]
+  left --> leftRight["..."]
 ```
 
-**Time complexities:** All O(log n) - get(), put(), remove(), containsKey()
-
-**Comparison with HashMap:**
-| Feature | HashMap | TreeMap |
-|---------|---------|---------|
-| Order | No order | Sorted by keys |
-| Performance | O(1) average | O(log n) |
-| Null keys | One allowed | Not allowed |
-| Interface | Map | NavigableMap, SortedMap |
+Key points:
+- Ordering is by natural key order or provided `Comparator`.
+- Supports navigational APIs: `firstKey`, `higherKey`, `floorEntry`, `subMap`.
+- Great for range queries and sorted traversals.
 
 ```java
-TreeMap<Integer, String> map = new TreeMap<>();
+NavigableMap<Integer, String> map = new TreeMap<>();
 map.put(3, "three");
 map.put(1, "one");
 map.put(2, "two");
 
-// Navigation methods
-map.firstKey();           // 1
-map.lastKey();            // 3
-map.lowerKey(2);          // 1 (strictly less)
-map.subMap(1, 3);         // {1=one, 2=two}
+Integer floor = map.floorKey(2); // 2
+SortedMap<Integer, String> sub = map.subMap(1, 3); // [1,3)
 ```
 
 ---

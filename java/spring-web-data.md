@@ -35,34 +35,47 @@
 <a id="q1"></a>
 ### Q1: What is Spring Data JPA?
 **Answer:**
-An abstraction layer over JPA that reduces boilerplate code by:
-- Providing repository interfaces with CRUD operations
+Spring Data JPA is a repository abstraction on top of JPA providers (commonly Hibernate) that reduces repetitive DAO boilerplate.
+
+Core capabilities:
+- Repository interfaces with prebuilt CRUD operations
 - Query derivation from method names
-- Pagination and sorting support
-- Custom query support via @Query
+- Pagination/sorting support (`Pageable`, `Sort`)
+- Custom JPQL/native queries (`@Query`)
+- Projection support (interface/class-based)
 
 ```java
 public interface UserRepository extends JpaRepository<User, Long> {
-    // Query derived from method name
-    List<User> findByEmailAndStatus(String email, Status status);
-    
-    // Custom query
-    @Query("SELECT u FROM User u WHERE u.createdAt > :date")
-    List<User> findRecentUsers(@Param("date") LocalDate date);
+    List<User> findByStatusAndEmailContaining(Status status, String emailPart);
+
+    @Query("select u from User u where u.createdAt >= :from")
+    List<User> findRecent(@Param("from") LocalDateTime from);
 }
 ```
+
+**Trade-off:** repository abstraction accelerates delivery, but complex read models may still need tuned SQL/JOOQ/JdbcTemplate paths.
 
 <a id="q2"></a>
 ### Q2: What is the difference between JpaRepository, CrudRepository, and PagingAndSortingRepository?
 **Answer:**
-```
-Repository (marker)
-    └── CrudRepository (basic CRUD)
-            └── PagingAndSortingRepository (+ paging/sorting)
-                    └── JpaRepository (+ JPA specific: flush, batch)
+```mermaid
+flowchart TD
+  repositoryNode[Repository]
+  crudNode[CrudRepository]
+  pagingNode[PagingAndSortingRepository]
+  jpaNode[JpaRepository]
+  repositoryNode --> crudNode
+  crudNode --> pagingNode
+  pagingNode --> jpaNode
 ```
 
-Use `JpaRepository` for most cases as it includes all features.
+| Interface | Adds |
+|-----------|------|
+| `CrudRepository` | basic CRUD (`save`, `findById`, `delete`) |
+| `PagingAndSortingRepository` | paging/sorting (`findAll(Pageable)`) |
+| `JpaRepository` | JPA-specific methods (`flush`, batch delete helpers) |
+
+Use `JpaRepository` by default in most Spring Boot JPA applications unless you intentionally want a narrower contract.
 
 ---
 
@@ -71,72 +84,77 @@ Use `JpaRepository` for most cases as it includes all features.
 <a id="q3"></a>
 ### Q3: What is Spring JDBC and when would you use it over JPA?
 **Answer:**
-Spring JDBC provides a simplified abstraction over raw JDBC.
+Spring JDBC is a lightweight abstraction over plain JDBC that removes connection/statement/result-set boilerplate.
 
-| Use JDBC | Use JPA |
-|----------|---------|
-| Complex native SQL queries | CRUD operations on entities |
-| Bulk operations (batch inserts) | Object-relational mapping |
-| Stored procedure calls | Lazy loading, caching |
-| Maximum performance control | Rapid development |
+| Prefer Spring JDBC | Prefer JPA |
+|--------------------|------------|
+| SQL-first data access | Domain-object-centric CRUD |
+| Complex joins/reporting SQL | rich entity graph management |
+| Bulk writes / batch ETL | rapid dev with repository patterns |
+| Need exact query/perf control | benefit from dirty checking & mapping |
+
+Use JDBC when query shape is complex and explicit SQL is a better fit than ORM mapping overhead.
 
 <a id="q4"></a>
 ### Q4: How do you use JdbcTemplate?
 **Answer:**
+`JdbcTemplate` centralizes resource handling and exception translation into Spring `DataAccessException`.
+
 ```java
 @Repository
 public class UserJdbcRepository {
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
-    
-    // Query for list
+    private final JdbcTemplate jdbcTemplate;
+
+    public UserJdbcRepository(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
     public List<User> findAll() {
-        return jdbcTemplate.query("SELECT * FROM users",
-            (rs, rowNum) -> new User(rs.getLong("id"), rs.getString("name")));
+        String sql = "select id, name, email from users";
+        return jdbcTemplate.query(sql, (rs, rowNum) ->
+            new User(rs.getLong("id"), rs.getString("name"), rs.getString("email")));
     }
-    
-    // Query for single value
-    public Integer count() {
-        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class);
+
+    public int rename(long id, String name) {
+        return jdbcTemplate.update("update users set name = ? where id = ?", name, id);
     }
-    
-    // Update
-    public int update(Long id, String name) {
-        return jdbcTemplate.update("UPDATE users SET name = ? WHERE id = ?", name, id);
+
+    public int[] batchInsert(List<User> users) {
+        String sql = "insert into users(name, email) values (?, ?)";
+        return jdbcTemplate.batchUpdate(sql, users, 200,
+            (ps, u) -> {
+                ps.setString(1, u.getName());
+                ps.setString(2, u.getEmail());
+            });
     }
-    
-    // Batch
-    jdbcTemplate.batchUpdate("INSERT INTO users (name) VALUES (?)",
-        new BatchPreparedStatementSetter() {
-            public void setValues(PreparedStatement ps, int i) throws SQLException {
-                ps.setString(1, users.get(i).getName());
-            }
-            public int getBatchSize() { return users.size(); }
-        });
 }
 ```
+
+**Interview point:** use explicit transactions for multi-step consistency; `JdbcTemplate` itself is not a transaction manager.
 
 <a id="q5"></a>
 ### Q5: What is the difference between JdbcTemplate and NamedParameterJdbcTemplate?
 **Answer:**
 | JdbcTemplate | NamedParameterJdbcTemplate |
-|--------------|---------------------------|
-| Uses `?` positional placeholders | Uses named parameters `:name` |
-| Order of parameters matters | Order doesn't matter |
-| Harder to read with many params | More readable |
+|--------------|----------------------------|
+| Positional placeholders (`?`) | Named placeholders (`:name`) |
+| Parameter order sensitive | Parameter order independent |
+| Can get hard to read with many params | More readable and safer for dynamic conditions |
 
 ```java
-// JdbcTemplate
-jdbcTemplate.query("SELECT * FROM users WHERE name = ? AND age > ?",
-    new Object[]{"John", 25}, rowMapper);
-
-// NamedParameterJdbcTemplate
-String sql = "SELECT * FROM users WHERE name = :name AND age > :age";
+String sql = """
+    select * from users
+    where status = :status
+      and created_at >= :from
+""";
 MapSqlParameterSource params = new MapSqlParameterSource()
-    .addValue("name", "John")
-    .addValue("age", 25);
-namedTemplate.query(sql, params, rowMapper);
+    .addValue("status", "ACTIVE")
+    .addValue("from", Timestamp.from(Instant.now().minus(30, ChronoUnit.DAYS)));
+
+List<User> users = namedParameterJdbcTemplate.query(sql, params, rowMapper);
 ```
+
+Use named parameters for maintainability once query complexity grows.
 
 ---
 
@@ -145,44 +163,51 @@ namedTemplate.query(sql, params, rowMapper);
 <a id="q6"></a>
 ### Q6: What is ORM and how does Hibernate implement it?
 **Answer:**
-**ORM (Object-Relational Mapping)**: Technique to map objects to database tables.
+ORM maps object models to relational tables so developers work with entities instead of manually mapping every row.
 
-| Concept | Java | Database |
-|---------|------|----------|
-| Class | Entity | Table |
-| Field | Property | Column |
-| Object | Instance | Row |
-| Association | Reference | Foreign Key |
+Hibernate (as a JPA provider) adds:
+- entity lifecycle management
+- persistence context (first-level cache)
+- dirty checking (automatic update generation)
+- fetch strategies and lazy loading
+- JPQL/HQL query support
 
-**JPA** is the specification, **Hibernate** is an implementation.
+| Java | Database |
+|------|----------|
+| Entity class | Table |
+| Field | Column |
+| Association | Foreign key relationship |
+| Entity instance | Row |
+
+**Trade-off:** ORM improves productivity but can hide SQL complexity; teams still need SQL literacy for production tuning.
 
 <a id="q7"></a>
 ### Q7: What is the N+1 problem and how do you solve it?
 **Answer:**
-N+1 problem: 1 query to fetch N entities, then N additional queries for related entities.
+N+1 occurs when one query loads parent rows, then an additional query is executed for each parent to fetch a relation.
 
 ```java
 List<Author> authors = authorRepository.findAll(); // 1 query
 for (Author author : authors) {
-    author.getBooks().size(); // N queries!
+    author.getBooks().size(); // +N queries if lazy-loaded per row
 }
 ```
 
-**Solutions:**
+Mitigation options:
+1. `JOIN FETCH` for targeted eager graph loads
+2. `@EntityGraph` on repository methods
+3. Batch fetching (`@BatchSize` or provider settings)
+4. DTO projections for read-heavy endpoints
+
 ```java
-// 1. JOIN FETCH (JPQL)
-@Query("SELECT a FROM Author a JOIN FETCH a.books")
+@Query("select a from Author a join fetch a.books")
 List<Author> findAllWithBooks();
 
-// 2. @EntityGraph
-@EntityGraph(attributePaths = {"books"})
+@EntityGraph(attributePaths = "books")
 List<Author> findAll();
-
-// 3. @BatchSize (Hibernate)
-@BatchSize(size = 10)
-@OneToMany
-private List<Book> books;
 ```
+
+**Important caveat:** fetch joins with pagination can produce duplicates or inefficient SQL depending on provider and query shape.
 
 ---
 
@@ -191,83 +216,88 @@ private List<Book> books;
 <a id="q8"></a>
 ### Q8: What is reactive programming and Spring WebFlux?
 **Answer:**
-Reactive programming focuses on asynchronous data streams with automatic backpressure handling.
+Reactive programming models asynchronous streams with non-blocking execution and backpressure control.
 
-**Key characteristics:**
-- **Non-blocking**: Doesn't block threads waiting for I/O
-- **Backpressure**: Consumer controls data flow rate
-- **Event-driven**: React to data as it arrives
+WebFlux is Spring’s reactive web stack built on Reactor (`Mono`, `Flux`) and non-blocking runtimes (for example, Netty).
 
 ```java
 @RestController
 @RequestMapping("/api/users")
-public class UserController {
+class UserController {
+    private final UserService userService;
+
+    UserController(UserService userService) { this.userService = userService; }
+
     @GetMapping("/{id}")
-    public Mono<User> getUser(@PathVariable String id) {
+    Mono<User> getById(@PathVariable String id) {
         return userService.findById(id);
     }
-    
-    @GetMapping
-    public Flux<User> getAllUsers() {
-        return userService.findAll();
-    }
-    
-    @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<User> streamUsers() {
-        return userService.findAll().delayElements(Duration.ofSeconds(1));
+
+    @GetMapping(produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    Flux<User> stream() {
+        return userService.streamAll();
     }
 }
 ```
+
+**Rule of thumb:** WebFlux shines for high-concurrency I/O-bound workloads with reactive dependencies.
 
 <a id="q9"></a>
 ### Q9: What is the difference between Mono and Flux?
 **Answer:**
 | Mono<T> | Flux<T> |
 |---------|---------|
-| 0 or 1 element | 0 to N elements |
-| Like Optional but async | Like List but async |
-| Single result operations | Collection/stream operations |
+| 0..1 element | 0..N elements |
+| Single async result | Async sequence/stream |
+| Good for one resource | Good for lists/events/streams |
 
 ```java
-Mono<User> user = Mono.just(new User("Alice"));
-Flux<Integer> numbers = Flux.just(1, 2, 3, 4, 5);
+Mono<User> one = userService.findById("u-1");
+Flux<User> many = userService.findAll();
 
-// Converting
-Mono<List<User>> listMono = userFlux.collectList();
-Flux<User> userFlux = userMono.flux();
+Mono<List<User>> asList = many.collectList();
+Flux<User> asFlux = one.flux();
 ```
+
+Choose based on cardinality semantics, not convenience.
 
 <a id="q10"></a>
 ### Q10: How do you handle backpressure in reactive streams?
 **Answer:**
-| Strategy | Description | Use Case |
-|----------|-------------|----------|
-| `onBackpressureBuffer()` | Buffer elements | Temporary spikes |
-| `onBackpressureDrop()` | Drop elements | Real-time data |
-| `onBackpressureLatest()` | Keep only latest | Status updates |
-| `limitRate(n)` | Request N at a time | Controlled processing |
+Backpressure manages producer speed relative to consumer capacity.
+
+| Strategy | Behavior | Typical use |
+|----------|----------|-------------|
+| `onBackpressureBuffer(n)` | queue up to n items | absorb short bursts |
+| `onBackpressureDrop()` | drop excess items | telemetry/event streams |
+| `onBackpressureLatest()` | keep latest only | state updates/UI |
+| `limitRate(n)` | request data in chunks | controlled downstream pressure |
 
 ```java
-Flux.range(1, 1000)
-    .onBackpressureBuffer(100)
-    .subscribe(this::process);
-
 Flux.interval(Duration.ofMillis(1))
-    .onBackpressureDrop(dropped -> log.warn("Dropped: {}", dropped))
-    .subscribe(this::slowProcess);
+    .onBackpressureDrop(d -> log.warn("Dropped {}", d))
+    .publishOn(Schedulers.boundedElastic(), 64)
+    .subscribe(this::slowConsumer);
 ```
+
+**Production advice:** monitor dropped/buffered metrics and decide policy explicitly; silent data loss is dangerous.
 
 <a id="q11"></a>
 ### Q11: When should you use WebFlux vs Spring MVC?
 **Answer:**
 | Use WebFlux | Use Spring MVC |
 |-------------|----------------|
-| High concurrency, many connections | Traditional request-response |
-| Streaming data | Blocking I/O (JDBC) |
-| Microservices with reactive DBs | Simple CRUD applications |
-| Event-driven architecture | Team familiar with imperative |
+| high concurrent I/O | classic request-response apps |
+| reactive stack end-to-end (R2DBC/WebClient) | blocking stack (JDBC/JPA) |
+| stream processing/SSE | straightforward CRUD with simple ops |
+| you can enforce non-blocking discipline | team prefers imperative model |
 
-**WebFlux drawbacks:** Steeper learning curve, harder to debug, limited blocking library support.
+WebFlux drawbacks:
+- steeper learning/debugging curve
+- accidental blocking can negate benefits
+- ecosystem still has blocking libraries in many domains
+
+If your DB and downstream clients are blocking, MVC is often the pragmatic choice.
 
 ---
 
@@ -276,82 +306,61 @@ Flux.interval(Duration.ofMillis(1))
 <a id="q12"></a>
 ### Q12: What is Spring Security and how does it work?
 **Answer:**
-Spring Security provides authentication, authorization, and protection against common attacks.
+Spring Security secures applications via filter chain processing, authentication mechanisms, and authorization checks.
 
-**Security Filter Chain:**
-```
-HTTP Request → Security Filter Chain → Controller
-                     │
-                     ├── SecurityContextPersistenceFilter
-                     ├── UsernamePasswordAuthenticationFilter
-                     ├── ExceptionTranslationFilter
-                     └── FilterSecurityInterceptor
+```mermaid
+flowchart LR
+  reqNode[HTTPRequest] --> chainNode[SecurityFilterChain]
+  chainNode --> contextFilter[SecurityContextFilter]
+  chainNode --> authFilter[AuthenticationFilter]
+  chainNode --> exceptionFilter[ExceptionTranslationFilter]
+  chainNode --> authorizeFilter[AuthorizationFilter]
+  authorizeFilter --> controllerNode[Controller]
 ```
 
+Minimal config:
 ```java
 @Configuration
 @EnableWebSecurity
-public class SecurityConfig {
+class SecurityConfig {
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         return http
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/public/**").permitAll()
                 .requestMatchers("/admin/**").hasRole("ADMIN")
-                .anyRequest().authenticated()
-            )
-            .formLogin(Customizer.withDefaults())
+                .anyRequest().authenticated())
             .build();
     }
 }
 ```
+
+**Conceptual flow:** authenticate user -> build `Authentication` -> store in `SecurityContext` -> authorize request/method access.
 
 <a id="q13"></a>
 ### Q13: What is the difference between authentication and authorization?
 **Answer:**
 | Authentication | Authorization |
 |----------------|---------------|
-| Who are you? | What can you do? |
-| Verify identity | Verify permissions |
-| Login process | Access control |
-| 401 Unauthorized | 403 Forbidden |
+| Verifies identity ("who are you?") | Verifies permissions ("what can you do?") |
+| Happens at login/token validation | Happens at endpoint/method/resource check |
+| Failure typically 401 | Failure typically 403 |
+
+Authentication should not imply full access; authorization must still be enforced at resource boundaries.
 
 <a id="q14"></a>
 ### Q14: How do you implement JWT authentication in Spring Boot?
 **Answer:**
-```java
-@Component
-public class JwtAuthenticationFilter extends OncePerRequestFilter {
-    @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain) throws ServletException, IOException {
-        String authHeader = request.getHeader("Authorization");
-        
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-        
-        String jwt = authHeader.substring(7);
-        String username = jwtService.extractUsername(jwt);
-        
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = userDetailsService.loadUserByUsername(username);
-            if (jwtService.isTokenValid(jwt, userDetails)) {
-                UsernamePasswordAuthenticationToken authToken = 
-                    new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-                SecurityContextHolder.getContext().setAuthentication(authToken);
-            }
-        }
-        filterChain.doFilter(request, response);
-    }
-}
+Typical stateless JWT setup:
+1. Client authenticates (username/password, OAuth, etc.).
+2. Server issues signed JWT (short TTL) + optional refresh token.
+3. Client sends `Authorization: Bearer <token>`.
+4. Filter validates token, then sets `SecurityContext`.
 
-// Security config
+```java
 @Bean
-public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
     return http
         .csrf(csrf -> csrf.disable())
         .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -363,63 +372,72 @@ public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
 }
 ```
 
+JWT hardening checklist:
+- sign with strong key and rotate keys
+- validate `exp`, `iss`, `aud`, and token type
+- keep access tokens short-lived
+- revoke/blacklist strategy for critical scenarios
+- never store sensitive secrets in token payload
+
 <a id="q15"></a>
 ### Q15: What are the common Spring Security annotations?
 **Answer:**
-| Annotation | Description |
-|------------|-------------|
-| `@EnableWebSecurity` | Enable Spring Security |
-| `@EnableMethodSecurity` | Enable method-level security |
-| `@PreAuthorize` | Check before method execution |
-| `@PostAuthorize` | Check after method execution |
-| `@Secured` | Simple role-based check |
+| Annotation | Purpose |
+|------------|---------|
+| `@EnableWebSecurity` | enables web security config |
+| `@EnableMethodSecurity` | enables method-level access control |
+| `@PreAuthorize` | checks before method call |
+| `@PostAuthorize` | checks after method call |
+| `@Secured` | role-based checks (simpler style) |
 
 ```java
-@PreAuthorize("hasRole('ADMIN')")
-public void adminOnly() { }
+@EnableMethodSecurity
+@Configuration
+class SecurityMethodConfig {}
 
-@PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
-public void adminOrManager() { }
+@PreAuthorize("hasRole('ADMIN')")
+public void adminOnly() {}
 
 @PreAuthorize("#userId == authentication.principal.id")
-public User getUser(@PathVariable Long userId) { }
-
-@PreAuthorize("@securityService.canAccess(#id)")
-public Resource getResource(@PathVariable Long id) { }
+public User getUser(Long userId) { ... }
 ```
+
+Use method security to protect business-level operations, not only HTTP endpoints.
 
 <a id="q16"></a>
 ### Q16: How do you configure CORS in Spring Security?
 **Answer:**
+Configure CORS in the security chain so preflight (`OPTIONS`) is evaluated correctly before auth checks.
+
 ```java
 @Bean
-public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
     return http
         .cors(cors -> cors.configurationSource(corsConfigurationSource()))
         .csrf(csrf -> csrf.disable())
+        .authorizeHttpRequests(auth -> auth.anyRequest().authenticated())
         .build();
 }
 
 @Bean
-public CorsConfigurationSource corsConfigurationSource() {
+CorsConfigurationSource corsConfigurationSource() {
     CorsConfiguration config = new CorsConfiguration();
-    config.setAllowedOrigins(Arrays.asList("http://localhost:3000"));
-    config.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE"));
-    config.setAllowedHeaders(Arrays.asList("Authorization", "Content-Type"));
+    config.setAllowedOrigins(List.of("https://app.example.com"));
+    config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+    config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
     config.setAllowCredentials(true);
-    
+    config.setMaxAge(3600L);
+
     UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
     source.registerCorsConfiguration("/**", config);
     return source;
 }
 ```
 
-**Controller-level:**
-```java
-@RestController
-@CrossOrigin(origins = "http://localhost:3000")
-public class ApiController { }
-```
+**Common pitfalls:**
+- using `"*"` with `allowCredentials(true)` (invalid combination)
+- forgetting preflight support
+- allowing overly broad origins/methods in production
 
 ---
 

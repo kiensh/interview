@@ -4,66 +4,108 @@
 
 ## Table of Contents
 
+### [Index Fundamentals](#index-fundamentals)
 - [Q1: What is a database index and how does it work?](#q1)
+
+### [Index Design Rules](#index-design-rules)
 - [Q2: What is a composite index and what is the leftmost prefix rule?](#q2)
+
+### [Index Types & Trade-offs](#index-types--trade-offs)
 - [Q3: What are the different types of database indexes?](#q3)
 - [Q4: What are PostgreSQL-specific index types (GIN, GiST)?](#q4)
+
+### [Physical Layout](#physical-layout)
 - [Q5: What is the difference between clustered and non-clustered indexes?](#q5)
 
 ---
 
+## Index Fundamentals
+
 <a id="q1"></a>
 ### Q1: What is a database index and how does it work?
 **Answer:**
-An index is a data structure that improves query speed at the cost of additional storage and slower writes.
+An index is a secondary data structure that lets the optimizer locate rows quickly without scanning the full table.
 
-**Common types:**
-- **B-Tree**: Default, good for range queries and equality
-- **Hash**: Fast equality lookups, no range queries
-- **Bitmap**: Low cardinality columns
-- **Full-text**: Text search
-- **Spatial**: R-tree for geographic/geometric data
+Think of it as a sorted lookup structure:
+1. Optimizer evaluates query predicates (`WHERE`, `JOIN`, `ORDER BY`).
+2. If index selectivity is good, it performs index lookup/scan.
+3. It either returns rows directly (index-only/covering scan) or does a table lookup for remaining columns.
+
+**Why indexes help:**
+- Reduce I/O by reading fewer pages.
+- Speed up equality and range predicates.
+- Can avoid explicit sorting if index order matches `ORDER BY`.
+
+**Why indexes hurt:**
+- Every insert/update/delete must maintain index entries.
+- Extra disk + memory pressure.
+- Too many indexes can slow writes significantly.
+
+**Interview phrase to use:** "Indexes optimize reads by trading off write cost and storage."
 
 ```sql
--- Create index
+-- Single-column index for frequent equality lookup
 CREATE INDEX idx_user_email ON users(email);
 
--- Composite index
+-- Composite index for common filter + sort pattern
 CREATE INDEX idx_user_name_date ON users(last_name, created_at);
 ```
+
+---
+
+## Index Design Rules
 
 <a id="q2"></a>
 ### Q2: What is a composite index and what is the leftmost prefix rule?
 **Answer:**
-Composite index indexes multiple columns. The order matters!
+A composite index contains multiple columns in a fixed order, so column order determines which queries can use it efficiently.
 
 ```sql
 CREATE INDEX idx_abc ON table(a, b, c);
 ```
 
-**Leftmost prefix rule** - index can be used for queries on:
+**Leftmost prefix rule** means the index can support:
 - (a)
 - (a, b)
 - (a, b, c)
 
-**Cannot use index for:**
+It usually cannot support efficiently:
 - (b)
 - (c)
 - (b, c)
 
+**Design strategy (production):**
+- Put highest selectivity and most frequent filter column first.
+- Align with common `WHERE + ORDER BY` pattern to avoid extra sort.
+- Avoid low-cardinality columns first unless combined with a selective prefix.
+- Re-check with `EXPLAIN ANALYZE` after creation; assumptions are often wrong.
+
+**Example query patterns:**
+```sql
+-- Uses idx_abc effectively
+SELECT * FROM table WHERE a = 10 AND b = 20 ORDER BY c;
+
+-- Often cannot use leading part efficiently
+SELECT * FROM table WHERE b = 20;
+```
+
 ---
+
+## Index Types & Trade-offs
 
 <a id="q3"></a>
 ### Q3: What are the different types of database indexes?
 **Answer:**
 
-| Index Type | Description | Best For |
-|------------|-------------|----------|
-| **B-Tree** | Balanced tree structure, default in most DBs | Range queries, equality, sorting |
-| **Hash** | Hash table based | Exact equality lookups only |
-| **Bitmap** | Bit arrays for each distinct value | Low cardinality columns (gender, status) |
-| **Full-text** | Inverted index for text search | Text search, keywords |
-| **Spatial** | R-tree or similar for geographic data | Geographic/geometric queries |
+| Index Type | What it is good at | Trade-offs / limitations |
+|------------|---------------------|-------------------------|
+| **B-Tree** | Equality + range + ordering | Default choice, but larger than hash |
+| **Hash** | Exact equality lookups | No range/order support |
+| **Bitmap** | Low-cardinality analytical filters | Expensive on heavy OLTP writes |
+| **Full-text** | Tokenized text search | Language-specific config, ranking complexity |
+| **Spatial** | Geo/geometric predicates | Specialized operators and maintenance |
+
+**Rule of thumb:** start with B-Tree unless a query type clearly needs another structure.
 
 ```sql
 -- B-Tree (default)
@@ -81,9 +123,9 @@ CREATE INDEX idx_content_fts ON articles USING GIN (to_tsvector('english', conte
 **Answer:**
 
 **GIN (Generalized Inverted Index)**
-- Best for: Full-text search, JSONB, arrays, hstore
-- Faster reads, slower writes
-- Larger index size
+- Best for: full-text, arrays, JSONB containment, `hstore`
+- Optimized for membership/containment lookups
+- Usually larger index and slower writes than B-Tree
 
 ```sql
 -- Full-text search
@@ -99,9 +141,9 @@ SELECT * FROM posts WHERE tags @> ARRAY['java', 'spring'];
 ```
 
 **GiST (Generalized Search Tree)**
-- Best for: Geometric/spatial data, range types, full-text (with lower precision)
-- More flexible, supports various operators
-- Good for overlapping ranges
+- Best for: ranges, geometric data, nearest-neighbor classes of queries
+- Flexible framework for many operator classes
+- Usually faster updates than GIN, often less exact/selective for some containment use cases
 
 ```sql
 -- Range types
@@ -115,10 +157,14 @@ SELECT * FROM places WHERE coordinates <@ box '((0,0),(100,100))';
 
 | Feature | GIN | GiST |
 |---------|-----|------|
-| Read speed | Faster | Slower |
-| Write speed | Slower | Faster |
+| Typical read pattern | Exact containment / term match | Overlap, nearest, geometric |
+| Write/update cost | Higher | Lower |
 | Index size | Larger | Smaller |
-| Best for | Exact containment | Overlapping/nearest |
+| Typical examples | JSONB/array/full-text | PostGIS, ranges, spatial |
+
+---
+
+## Physical Layout
 
 <a id="q5"></a>
 ### Q5: What is the difference between clustered and non-clustered indexes?
@@ -126,11 +172,10 @@ SELECT * FROM places WHERE coordinates <@ box '((0,0),(100,100))';
 
 | Clustered Index | Non-Clustered Index |
 |-----------------|---------------------|
-| Determines physical order of data | Separate structure pointing to data |
-| Only ONE per table | Multiple allowed per table |
-| Faster for range queries | Requires additional lookup |
-| Table IS the index | Index is separate from table |
-| Slower inserts (maintains order) | Faster inserts |
+| Defines physical row order | Separate structure pointing to row locations |
+| Usually one per table | Many per table |
+| Great for range scans by key | May require extra heap lookup |
+| Strong locality for sequential access | More random I/O on fetch |
 
 **MySQL/InnoDB:**
 ```sql
@@ -157,6 +202,8 @@ CREATE NONCLUSTERED INDEX idx_customer ON orders(customer_id);
 -- PostgreSQL CLUSTER (one-time reorder)
 CLUSTER orders USING idx_order_date;
 ```
+
+**Interview nuance:** in PostgreSQL, "clustered behavior" is an operational optimization, not a persistent storage guarantee like InnoDB's primary key clustering.
 
 ---
 

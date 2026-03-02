@@ -11,12 +11,12 @@ A comprehensive collection of interview questions and answers for software engin
 | [behavioral/](behavioral/) | **Behavioral Interview Questions** | **~25** |
 | [golang/](golang/) | **Go Language & Gin Framework** | **~155** |
 | [java/](java/) | Java Core, Concurrency, Modern Java | ~50 |
-| [database/](database/) | SQL, NoSQL, Optimization | ~38 |
+| [database/](database/) | SQL, NoSQL, Redis, Optimization | ~80 |
 | [messaging.md](messaging.md) | Messaging (Kafka) | 4 |
 | [microservices.md](microservices.md) | Microservices Architecture | 27 |
 | [design-patterns.md](design-patterns.md) | Design Patterns | 21 |
 
-**Total: ~480+ Questions**
+**Total: ~522+ Questions**
 
 ## Topics Covered
 
@@ -97,6 +97,7 @@ A comprehensive collection of interview questions and answers for software engin
 
 ### Databases ([database/](database/))
 - SQL vs NoSQL
+- Redis data structures, persistence (RDB/AOF), Sentinel/Cluster, Streams
 - Normalization & Denormalization
 - Indexing (B-Tree, Hash, GIN, GiST, Clustered/Non-Clustered)
 - Partitioning (Range, List, Hash)

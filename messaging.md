@@ -4,1563 +4,890 @@
 
 ## Table of Contents
 
+### [Kafka Foundations](#kafka-foundations)
 - [Q1: What is Apache Kafka?](#q1)
 - [Q2: What are Kafka's key concepts?](#q2)
 - [Q3: How do you use Kafka with Spring Boot?](#q3)
 - [Q4: What is the difference between Kafka and message queues?](#q4)
+
+### [Durability and Storage Semantics](#durability-and-storage-semantics)
 - [Q5: How does Kafka achieve high availability with replication?](#q5)
 - [Q6: How do partition keys work and how do you design them?](#q6)
 - [Q7: What is log compaction and when should you use it?](#q7)
+
+### [Failures, Guarantees, and Exactly-Once](#failures-guarantees-and-exactly-once)
 - [Q8: What happens when a Kafka broker fails?](#q8)
 - [Q9: What are the different acks settings and their trade-offs?](#q9)
 - [Q10: How does the idempotent producer work and why is it important?](#q10)
+- [Q15: How do Kafka transactions work for exactly-once semantics?](#q15)
+
+### [Producer and Consumer Performance and Operations](#producer-and-consumer-performance-and-operations)
 - [Q11: How do you tune producer for high throughput vs low latency?](#q11)
 - [Q12: How do you handle consumer offset management?](#q12)
 - [Q13: What is consumer lag and how do you handle it?](#q13)
 - [Q14: What are the partition assignment strategies?](#q14)
-- [Q15: How do Kafka transactions work for exactly-once semantics?](#q15)
+
+### [Schema, Security, and Observability](#schema-security-and-observability)
 - [Q16: What is Schema Registry and why is it important?](#q16)
 - [Q17: How do you configure Kafka security?](#q17)
 - [Q18: What are the key Kafka metrics to monitor?](#q18)
 
 ---
 
+## Kafka Foundations
+
 <a id="q1"></a>
 ### Q1: What is Apache Kafka?
 **Answer:**
-Apache Kafka is a distributed event streaming platform for high-throughput, fault-tolerant messaging.
 
-**Key features:**
-- Distributed and scalable
-- High throughput (millions of messages/sec)
-- Durable storage (persists to disk)
-- Real-time processing
-- Exactly-once semantics
+Apache Kafka is a distributed event streaming platform built around an append-only log. Instead of "send then delete" queue semantics, Kafka keeps records for a retention window so multiple consumers can read at their own pace.
 
+**Why Kafka is widely used in backend systems:**
+- High sustained throughput from sequential disk I/O and batching.
+- Fault tolerance through replication and leader/follower partition model.
+- Loose coupling between producers and consumers via topics.
+- Replayability for reprocessing, auditing, and backfills.
+- Strong delivery guarantees when configured with idempotence and transactions.
+
+**Core capabilities and what they mean in practice:**
+
+| Capability | What It Enables |
+|------------|-----------------|
+| Partitioned log | Horizontal scale and parallel consumption |
+| Retention policy | Replay historical events without republishing |
+| Consumer groups | Independent applications consume same topic differently |
+| Replication + ISR | Resilience to broker failures |
+| Stream ecosystem | Native fit for Kafka Streams/Flink style pipelines |
+
+```mermaid
+flowchart LR
+  producer[Producer Service]
+
+  subgraph kafkaCluster [Kafka Cluster]
+    subgraph ordersTopic [Topic orders]
+      p0[Partition 0]
+      p1[Partition 1]
+      p2[Partition 2]
+    end
+    b1[Broker 1]
+    b2[Broker 2]
+    b3[Broker 3]
+  end
+
+  subgraph consumerGroup [Consumer Group order-processors]
+    c1[Consumer 1]
+    c2[Consumer 2]
+  end
+
+  producer -->|produce| p0
+  producer -->|produce| p1
+  producer -->|produce| p2
+
+  p0 --> b1
+  p1 --> b2
+  p2 --> b3
+
+  p0 --> c1
+  p1 --> c2
+  p2 --> c1
 ```
-┌───────────────────────────────────────────────────────┐
-│                    Kafka Cluster                       │
-│  ┌─────────────────────────────────────────────────┐  │
-│  │              Topic: orders                       │  │
-│  │  ┌───────────┬───────────┬───────────┐          │  │
-│  │  │Partition 0│Partition 1│Partition 2│          │  │
-│  │  │ [0,1,2,3] │ [0,1,2]   │ [0,1,2,3,4]│         │  │
-│  │  └───────────┴───────────┴───────────┘          │  │
-│  └─────────────────────────────────────────────────┘  │
-│                                                       │
-│  Broker 1        Broker 2        Broker 3            │
-└───────────────────────────────────────────────────────┘
-        ▲                                   │
-        │ Produce                           │ Consume
-        │                                   ▼
-   ┌─────────┐                      ┌───────────────┐
-   │ Producer│                      │Consumer Group │
-   └─────────┘                      │  ┌────┬────┐  │
-                                    │  │ C1 │ C2 │  │
-                                    │  └────┴────┘  │
-                                    └───────────────┘
-```
+
+**Common interview pitfall:** saying "Kafka is just a queue." A better answer is "Kafka can be used like a queue, but its native model is a distributed log with retention and replay."
 
 <a id="q2"></a>
 ### Q2: What are Kafka's key concepts?
 **Answer:**
 
-| Concept | Description |
-|---------|-------------|
-| **Topic** | Category/feed name for messages |
-| **Partition** | Ordered, immutable sequence of messages |
-| **Offset** | Unique ID for message within partition |
-| **Producer** | Publishes messages to topics |
-| **Consumer** | Reads messages from topics |
-| **Consumer Group** | Group of consumers sharing workload |
-| **Broker** | Kafka server in the cluster |
-| **Replication** | Copies of partitions for fault tolerance |
+Understanding Kafka means understanding how log storage, parallelism, and consumer coordination interact.
 
-**Message ordering:**
-- Ordering guaranteed within a partition only
-- Use same key for related messages → same partition
+| Concept | Deep Explanation |
+|---------|------------------|
+| Topic | Logical stream name; producers write to it, consumers subscribe to it |
+| Partition | Ordered shard of a topic; ordering is guaranteed only inside one partition |
+| Offset | Monotonic position of a record in a partition |
+| Producer | Client writing records, optionally with key for deterministic partitioning |
+| Consumer | Client reading records and tracking progress via committed offsets |
+| Consumer Group | Consumers that share work for a topic; one partition is assigned to one consumer within a group |
+| Broker | Kafka server that stores partitions and serves produce/fetch requests |
+| ISR | In-sync replicas eligible for `acks=all` durability guarantees |
 
-```java
-// Producer sends with key for ordering
-producer.send(new ProducerRecord<>("orders", 
-    orderId,        // Key - determines partition
-    orderData));    // Value
+**Important implications:**
+- Same key -> same partition -> per-key ordering.
+- More consumers than partitions does not increase parallelism.
+- Different consumer groups can independently read the same records.
 
-// Same orderId always goes to same partition
-// Messages for same order processed in order
+```mermaid
+flowchart TB
+  subgraph ordersTopic [Topic orders with 3 partitions]
+    p0[p0]
+    p1[p1]
+    p2[p2]
+  end
+
+  subgraph groupA [Group A real-time processors]
+    a1[A1]
+    a2[A2]
+    a3[A3]
+  end
+
+  subgraph groupB [Group B analytics backfill]
+    b1[B1]
+  end
+
+  p0 --> a1
+  p1 --> a2
+  p2 --> a3
+
+  p0 --> b1
+  p1 --> b1
+  p2 --> b1
 ```
 
-**Consumer groups:**
-```
-Topic with 3 partitions:
-┌────┐ ┌────┐ ┌────┐
-│ P0 │ │ P1 │ │ P2 │
-└──┬─┘ └──┬─┘ └──┬─┘
-   │      │      │
-Consumer Group A:
-   │      │      │
-   ▼      ▼      ▼
-┌────┐ ┌────┐ ┌────┐
-│ C1 │ │ C2 │ │ C3 │  ← Each consumer gets one partition
-└────┘ └────┘ └────┘
-
-Consumer Group B (different group):
-   │      │      │
-   ▼      ▼      ▼
-┌─────────────────┐
-│       C1        │  ← Single consumer gets all partitions
-└─────────────────┘
-```
+**Interview talking point:** "Kafka gives ordered processing per partition, not globally. Global ordering requires one partition, which limits throughput."
 
 <a id="q3"></a>
 ### Q3: How do you use Kafka with Spring Boot?
 **Answer:**
 
-**Dependencies:**
+In Spring Boot, `spring-kafka` provides producer/consumer abstractions, listener containers, retry/DLT patterns, and transactional support.
+
+**Dependency:**
 ```groovy
 implementation 'org.springframework.kafka:spring-kafka'
 ```
 
-**Configuration:**
+**Production-oriented configuration (reliability first):**
 ```yaml
 spring:
   kafka:
     bootstrap-servers: localhost:9092
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 2147483647
+      properties:
+        enable.idempotence: true
+        delivery.timeout.ms: 120000
+        max.in.flight.requests.per.connection: 5
     consumer:
-      group-id: my-group
+      group-id: order-processor
       auto-offset-reset: earliest
+      enable-auto-commit: false
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
       properties:
         spring.json.trusted.packages: "com.example.events"
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+        isolation.level: read_committed
+    listener:
+      ack-mode: manual
+      concurrency: 3
 ```
 
-**Producer:**
+**Producer example with async callback and metadata logging:**
 ```java
 @Service
 public class OrderEventProducer {
-    
-    @Autowired
-    private KafkaTemplate<String, OrderEvent> kafkaTemplate;
-    
-    public void sendOrderCreated(Order order) {
-        OrderCreatedEvent event = new OrderCreatedEvent(order);
-        
-        kafkaTemplate.send("order-events", order.getId(), event)
-            .whenComplete((result, ex) -> {
-                if (ex == null) {
-                    log.info("Sent: {} to partition {}", 
-                        event, result.getRecordMetadata().partition());
-                } else {
-                    log.error("Failed to send", ex);
-                }
-            });
+    private final KafkaTemplate<String, OrderEvent> template;
+
+    public OrderEventProducer(KafkaTemplate<String, OrderEvent> template) {
+        this.template = template;
     }
-    
-    // Synchronous send
-    public void sendSync(OrderEvent event) throws Exception {
-        kafkaTemplate.send("order-events", event).get(10, TimeUnit.SECONDS);
+
+    public void sendOrderCreated(OrderEvent event) {
+        template.send("order-events", event.orderId(), event)
+            .whenComplete((result, ex) -> {
+                if (ex != null) {
+                    log.error("Publish failed for order {}", event.orderId(), ex);
+                    return;
+                }
+                var meta = result.getRecordMetadata();
+                log.info("Published order {} to partition {} offset {}",
+                    event.orderId(), meta.partition(), meta.offset());
+            });
     }
 }
 ```
 
-**Consumer:**
+**Consumer example with manual ack and fail-fast behavior:**
 ```java
 @Component
 public class OrderEventConsumer {
-    
+
     @KafkaListener(topics = "order-events", groupId = "order-processor")
-    public void handleOrderEvent(OrderEvent event) {
-        log.info("Received: {}", event);
-        processOrder(event);
-    }
-    
-    // With manual acknowledgment
-    @KafkaListener(topics = "order-events", groupId = "order-processor")
-    public void handleWithAck(OrderEvent event, Acknowledgment ack) {
+    public void handle(OrderEvent event, Acknowledgment ack) {
         try {
-            processOrder(event);
-            ack.acknowledge();  // Manual commit
-        } catch (Exception e) {
-            // Don't ack - will be redelivered
-            throw e;
+            process(event);
+            ack.acknowledge(); // commit only after successful processing
+        } catch (Exception ex) {
+            // Let container retry or route to DLT based on listener config
+            throw ex;
         }
-    }
-    
-    // Batch processing
-    @KafkaListener(topics = "order-events", groupId = "batch-processor")
-    public void handleBatch(List<OrderEvent> events) {
-        log.info("Received batch of {} events", events.size());
-        events.forEach(this::processOrder);
-    }
-    
-    // With message metadata
-    @KafkaListener(topics = "order-events")
-    public void handleWithMetadata(
-            @Payload OrderEvent event,
-            @Header(KafkaHeaders.RECEIVED_PARTITION) int partition,
-            @Header(KafkaHeaders.OFFSET) long offset) {
-        log.info("Received from partition {} at offset {}: {}", 
-            partition, offset, event);
     }
 }
 ```
+
+**What strong answers include:**
+- Serialization choice (JSON vs Avro/Protobuf with Schema Registry).
+- Retry and dead-letter topic strategy.
+- Idempotent consumer logic for at-least-once delivery.
+- Partition key choice for ordering-sensitive domains.
 
 <a id="q4"></a>
 ### Q4: What is the difference between Kafka and message queues?
 **Answer:**
 
-| Feature | Kafka | Message Queue (RabbitMQ, SQS) |
-|---------|-------|------------------------------|
-| Model | Log-based (append-only) | Queue-based (FIFO) |
-| Persistence | Always persisted | Usually transient |
-| Consumption | Pull-based | Push or Pull |
-| Replay | Yes (read from any offset) | No (consumed = deleted) |
-| Consumer model | Consumer groups | Competing consumers |
-| Ordering | Per partition | Per queue |
-| Throughput | Very high (millions/sec) | Medium |
-| Use case | Event streaming, log aggregation | Task queues, RPC |
+Kafka and classic message queues solve different primary problems.
 
-**When to use Kafka:**
-- Event sourcing
-- Log aggregation
-- Stream processing
-- High throughput requirements
-- Need to replay events
+| Dimension | Kafka | RabbitMQ / SQS style queue |
+|-----------|-------|-----------------------------|
+| Core model | Distributed log | Queue with message handoff |
+| Record lifecycle | Retained by policy | Removed after ack/visibility window |
+| Consumption pattern | Consumer-controlled offset pull | Broker-managed delivery semantics |
+| Replay | Native | Limited / workflow-specific |
+| Best fit | Event streaming and analytics pipelines | Task distribution and work queues |
+| Throughput profile | Very high sustained throughput | Typically lower throughput, often lower per-message latency |
 
-**When to use Message Queues:**
-- Task distribution
-- RPC-style communication
-- Simple pub/sub
-- Guaranteed delivery to one consumer
-- Complex routing logic
+```mermaid
+flowchart TB
+  subgraph kafkaLog [Kafka log model]
+    k0[offset 0]
+    k1[offset 1]
+    k2[offset 2]
+    k3[offset 3]
+  end
+  ca[Consumer A offset 1]
+  cb[Consumer B offset 3]
+  k1 --> ca
+  k3 --> cb
 
+  subgraph queueModel [Queue model]
+    q1[msg1]
+    q2[msg2]
+    q3[msg3]
+  end
+  worker[Worker]
+  q1 --> worker
+  q2 --> worker
+  q3 --> worker
 ```
-Kafka - Event Log:
-┌─────────────────────────────────────────┐
-│ [0] [1] [2] [3] [4] [5] [6] [7] →       │
-└─────────────────────────────────────────┘
-  ↑           ↑               ↑
-Consumer A  Consumer B    New messages
-(offset 2)  (offset 5)    
-                          
-Messages persist, consumers track their position
 
-Message Queue:
-┌─────────────────────────────────────────┐
-│ [msg1] [msg2] [msg3] → Consumer         │
-└─────────────────────────────────────────┘
-              ↓
-           Deleted after consumption
-```
+**Decision heuristic:**
+- Need replay, event history, stream processing, many consumers -> Kafka.
+- Need per-message routing, request/reply, straightforward task execution -> queue.
+
+---
+
+## Durability and Storage Semantics
 
 <a id="q5"></a>
 ### Q5: How does Kafka achieve high availability with replication?
 **Answer:**
 
-Kafka uses partition replication across multiple brokers to ensure high availability and data durability.
+Kafka replicates each partition across brokers. One replica is the leader; followers replicate from it. Writes are confirmed based on `acks` and ISR state.
 
-**Key Concepts:**
+**Key terms and why they matter:**
 
-| Term | Description |
-|------|-------------|
-| Replication Factor | Number of copies of each partition (typically 3) |
-| Leader | Partition replica that handles all reads/writes |
-| Follower | Replicas that replicate data from the leader |
-| ISR (In-Sync Replicas) | Followers that are fully caught up with the leader |
-| min.insync.replicas | Minimum ISR count required for writes to succeed |
+| Term | Meaning | Why It Matters |
+|------|---------|----------------|
+| Replication factor | Number of replicas per partition | Failure tolerance |
+| Leader | Replica handling reads/writes | Primary availability endpoint |
+| Follower | Replica fetching leader log | Redundancy and failover candidate |
+| ISR | Followers sufficiently caught up | Durability boundary for `acks=all` |
+| `min.insync.replicas` | Required ISR count for successful writes | Protects against acknowledged data loss |
 
-**How Replication Works:**
+```mermaid
+sequenceDiagram
+  participant Producer
+  participant Leader
+  participant FollowerA
+  participant FollowerB
 
+  Producer->>Leader: Produce record
+  Leader->>Leader: Append to local log
+  Leader->>FollowerA: Replication fetch serves new record
+  Leader->>FollowerB: Replication fetch serves new record
+  FollowerA-->>Leader: Replica acknowledged
+  FollowerB-->>Leader: Replica acknowledged
+  Leader-->>Producer: Ack (for acks=all)
 ```
-Topic: orders (replication-factor=3)
 
-Partition 0:
-├── Broker 1: Leader    ← All reads/writes go here
-├── Broker 2: Follower (ISR)
-└── Broker 3: Follower (ISR)
+**Durability baseline in production:**
+- `replication.factor=3`
+- `min.insync.replicas=2`
+- producer `acks=all`
 
-Partition 1:
-├── Broker 2: Leader
-├── Broker 1: Follower (ISR)
-└── Broker 3: Follower (ISR)
-```
-
-**Write Flow:**
-1. Producer sends message to partition leader
-2. Leader writes to local log
-3. Followers fetch and replicate the message
-4. Once enough replicas acknowledge (based on `acks`), write is confirmed
-
-**Configuration for Durability:**
-
-| Setting | Recommended | Purpose |
-|---------|-------------|---------|
-| replication.factor | 3 | Survive 2 broker failures |
-| min.insync.replicas | 2 | Require at least 2 replicas for writes |
-| acks | all | Wait for all ISR to acknowledge |
-
-**ISR Dynamics:**
-- Follower falls out of ISR if it falls too far behind (`replica.lag.time.max.ms`)
-- When follower catches up, it rejoins ISR
-- If ISR count < `min.insync.replicas`, writes fail (data safety over availability)
+**Trade-off:** with strict ISR requirements, writes can fail during multi-broker degradation. That is an intentional choice for data safety over write availability.
 
 <a id="q6"></a>
 ### Q6: How do partition keys work and how do you design them?
 **Answer:**
 
-Partition keys determine which partition a message goes to, affecting ordering and load distribution.
+Partition keys decide both ordering scope and load distribution. Bad key design causes hot partitions and lag.
 
-**How Partitioning Works:**
+```mermaid
+flowchart TD
+  msg[Incoming record]
+  hasKey{Key present}
+  hash["hash(key) mod partitionCount"]
+  rr[Sticky round-robin partitioner]
+  part[Chosen partition]
+  order[Ordering guaranteed in partition]
+  balance[Load spread across partitions]
 
-```
-Default: partition = hash(key) % num_partitions
-
-Message with key="user-123" → hash("user-123") % 6 → Partition 3
-Message with key="user-456" → hash("user-456") % 6 → Partition 1
-Message with key=null       → Round-robin distribution
-```
-
-**Key Design Principles:**
-
-| Principle | Explanation |
-|-----------|-------------|
-| Ordering Guarantee | Messages with same key always go to same partition → ordered processing |
-| Cardinality | High cardinality keys = better load distribution |
-| Hot Partitions | Avoid keys that cause uneven distribution |
-
-**Common Key Strategies:**
-
-| Use Case | Key Strategy | Example |
-|----------|--------------|---------|
-| User events | User ID | `user-12345` |
-| Order processing | Order ID | `order-67890` |
-| Multi-tenant | Tenant + Entity ID | `tenant-A:user-123` |
-| Time-series | Sensor ID | `sensor-west-01` |
-| Geographic | Region | `us-east`, `eu-west` |
-
-**Avoiding Hot Partitions:**
-
-```
-❌ Bad: Using country as key
-   - "US" gets 60% of traffic → one partition overloaded
-
-✅ Good: Using user_id as key
-   - Even distribution across partitions
-
-✅ Good: Compound key for ordering within groups
-   - key = "customer-123" (all orders for customer in same partition)
+  msg --> hasKey
+  hasKey -- yes --> hash
+  hasKey -- no --> rr
+  hash --> part
+  rr --> part
+  part --> order
+  part --> balance
 ```
 
-**When to Use Null Keys:**
-- When ordering doesn't matter
-- Want maximum parallelism and even distribution
-- Log aggregation, metrics collection
+**Design principles:**
+- Pick key by business entity requiring order (`orderId`, `accountId`, `userId`).
+- Ensure high cardinality to avoid skew.
+- Avoid low-cardinality keys (`country`, `status`) for high-volume topics.
+- Revisit key strategy when traffic shape changes, not only at initial design.
 
-**Trade-offs:**
+**Examples:**
 
-| More Partitions | Fewer Partitions |
-|-----------------|------------------|
-| Higher parallelism | Lower overhead |
-| Better throughput | Simpler management |
-| More rebalancing time | Faster rebalancing |
-| More file handles | Lower resource usage |
+| Use Case | Key | Why |
+|----------|-----|-----|
+| Payment lifecycle | `paymentId` | Strict per-payment ordering |
+| User event stream | `userId` | Consistent per-user timeline |
+| Multi-tenant events | `tenantId:userId` | Tenant-scoped order + distribution |
+| Metrics/log firehose | `null` key | Maximum spread when order is irrelevant |
+
+**Practical caveat:** increasing partition count can change `hash(key) mod N`, which can shift key-to-partition mapping. Plan for this during scaling.
 
 <a id="q7"></a>
 ### Q7: What is log compaction and when should you use it?
 **Answer:**
 
-Log compaction retains only the latest value for each key, rather than all historical messages.
+Log compaction keeps the latest value per key, rather than retaining every historical value forever.
 
-**Retention vs Compaction:**
+**Retention vs compaction:**
 
-| Retention-based | Compaction-based |
-|-----------------|------------------|
-| Delete messages older than X days | Keep latest value per key |
-| Time or size-based cleanup | Key-based cleanup |
-| All history within window | Only latest state |
-| Use: Event streams, logs | Use: State, CDC, snapshots |
+| Policy | Behavior | Typical Use |
+|--------|----------|-------------|
+| `delete` | Remove old segments by time/size | Event history and analytics streams |
+| `compact` | Retain latest record per key | Current-state topics and changelogs |
+| `compact,delete` | Keep latest keys plus bounded history | Hybrid operational workloads |
 
-**How Compaction Works:**
-
-```
-Before Compaction:
-Offset 0: key=A, value=1
-Offset 1: key=B, value=2
-Offset 2: key=A, value=3  ← newer value for A
-Offset 3: key=C, value=4
-Offset 4: key=B, value=5  ← newer value for B
-Offset 5: key=A, value=null (tombstone)
-
-After Compaction:
-Offset 3: key=C, value=4
-Offset 4: key=B, value=5
-(key=A deleted due to tombstone)
+```mermaid
+flowchart LR
+  o0["offset0 A=1"] --> o1["offset1 B=2"] --> o2["offset2 A=3"] --> o3["offset3 C=4"] --> o4["offset4 B=5"] --> o5["offset5 A=null tombstone"]
+  o5 --> compacted["After compaction: C=4, B=5, A deleted after tombstone retention"]
 ```
 
-**Use Cases:**
+**When compaction is the right fit:**
+- CDC topics where consumers need latest row state by primary key.
+- Configuration topics where only current values matter.
+- Kafka Streams state-store changelogs.
 
-| Use Case | Why Compaction |
-|----------|----------------|
-| Database CDC | Latest row state for each primary key |
-| User profiles | Current profile, not history |
-| Configuration | Latest config values |
-| Cache rebuilding | Rebuild cache from topic |
-| Kafka Streams state stores | KTable changelog topics |
+**Operational notes that interviewers care about:**
+- Compaction is asynchronous; old records may still exist temporarily.
+- Tombstones (`value=null`) must be retained long enough for downstream consumers.
+- Active segment is not compacted immediately.
 
-**Configuration:**
+---
 
-| Setting | Description |
-|---------|-------------|
-| `cleanup.policy=compact` | Enable compaction |
-| `cleanup.policy=compact,delete` | Compact + delete old segments |
-| `min.cleanable.dirty.ratio` | Trigger compaction when dirty ratio exceeds |
-| `delete.retention.ms` | How long to keep tombstones |
-| `segment.ms` | Closed segments are eligible for compaction |
-
-**Tombstones (Deletion):**
-- Message with `value=null` marks key for deletion
-- Tombstone retained for `delete.retention.ms`
-- Consumers can see the deletion event
-- After retention, key is fully removed
-
-**Important Considerations:**
-- Compaction is asynchronous (not immediate)
-- Active segment is never compacted
-- Messages may exist temporarily after "deletion"
-- Ordering within a key is preserved
+## Failures, Guarantees, and Exactly-Once
 
 <a id="q8"></a>
 ### Q8: What happens when a Kafka broker fails?
 **Answer:**
 
-Kafka handles broker failures through automatic leader election and consumer rebalancing.
+Kafka treats broker failure as a metadata event managed by the controller (KRaft in modern clusters). Recovery includes leader election and client metadata refresh.
 
-**Broker Failure Scenarios:**
+```mermaid
+sequenceDiagram
+  participant Controller
+  participant Broker1 as FailedLeader
+  participant Broker2 as ISRReplica
+  participant Producer
+  participant Consumer
 
-**1. Leader Broker Fails:**
-
-```
-Before Failure:
-Partition 0: Broker 1 (Leader) ← fails
-            Broker 2 (Follower, ISR)
-            Broker 3 (Follower, ISR)
-
-After Failure:
-Partition 0: Broker 2 (New Leader) ← elected from ISR
-            Broker 3 (Follower, ISR)
-            Broker 1 (offline)
-```
-
-**Leader Election Process:**
-1. Controller detects broker failure (via ZooKeeper/KRaft)
-2. Controller selects new leader from ISR
-3. Controller updates metadata
-4. Clients refresh metadata and connect to new leader
-5. Brief unavailability during election (typically milliseconds)
-
-**2. Follower Broker Fails:**
-
-```
-Before: ISR = [Broker 1 (leader), Broker 2, Broker 3]
-Broker 3 fails...
-After:  ISR = [Broker 1 (leader), Broker 2]
-
-- Writes continue if ISR >= min.insync.replicas
-- When Broker 3 recovers, it catches up and rejoins ISR
+  Controller-->>Broker1: Heartbeat timeout detected
+  Controller->>Broker2: Promote as new leader
+  Controller-->>Producer: Metadata update
+  Controller-->>Consumer: Metadata update
+  Producer->>Broker2: Retry produce to new leader
+  Consumer->>Broker2: Fetch from new leader
 ```
 
-**3. Impact on Producers:**
+**Failure impact by role:**
+- **Producers:** transient `NotLeaderOrFollower` or timeout until metadata refresh.
+- **Consumers:** fetch retries and possible group rebalance if member failures also occur.
+- **Cluster:** short availability dip for affected partitions during election.
 
-| Scenario | acks=1 | acks=all |
-|----------|--------|----------|
-| Leader fails mid-write | Message may be lost | Message safe if ISR acknowledged |
-| ISR < min.insync.replicas | Writes succeed | Writes fail (NotEnoughReplicas) |
+**Important edge case:**
+- If ISR shrinks below `min.insync.replicas`, writes with `acks=all` fail intentionally.
+- `unclean.leader.election=true` increases availability but risks data loss.
 
-**4. Impact on Consumers:**
-
-```
-Consumer Group Rebalancing:
-
-Before: Consumer 1 → Partitions [0, 1]
-        Consumer 2 → Partitions [2, 3]
-        
-Consumer 2 fails...
-
-After:  Consumer 1 → Partitions [0, 1, 2, 3] (rebalanced)
-```
-
-**Recovery Timeline:**
-
-| Phase | Duration | Description |
-|-------|----------|-------------|
-| Detection | 1-10 sec | `session.timeout.ms` for consumers |
-| Election | ~ms | Controller elects new leader |
-| Metadata propagation | ~ms | Clients get new leader info |
-| Consumer rebalance | seconds | `max.poll.interval.ms` timeout |
-
-**Unclean Leader Election:**
-- If all ISR replicas fail, can elect out-of-sync replica
-- `unclean.leader.election.enable=false` (default): Wait for ISR replica
-- `unclean.leader.election.enable=true`: Possible data loss but availability
+**Production guidance:** tune timeouts and retries realistically; most outages are made worse by client retry storms rather than election itself.
 
 <a id="q9"></a>
 ### Q9: What are the different acks settings and their trade-offs?
 **Answer:**
 
-The `acks` (acknowledgments) setting controls durability vs performance trade-off for producers.
+`acks` controls when the producer considers a write successful.
 
-**Acks Settings:**
+| `acks` | Ack point | Durability | Throughput / Latency |
+|--------|-----------|------------|----------------------|
+| `0` | No broker ack | Lowest | Highest throughput, lowest latency |
+| `1` | Leader append | Medium | Good balance for non-critical events |
+| `all` | All ISR replicas append | Highest with `min.insync.replicas` | Higher latency, lower throughput |
 
-| acks | Behavior | Durability | Performance |
-|------|----------|------------|-------------|
-| `0` | Fire and forget, no acknowledgment | Lowest | Highest throughput |
-| `1` | Wait for leader acknowledgment | Medium | Good throughput |
-| `all` / `-1` | Wait for all ISR acknowledgment | Highest | Lower throughput |
+```mermaid
+flowchart TD
+  start[Producer send]
+  mode{acks mode}
+  noAck["acks=0: no confirmation"]
+  leaderAck["acks=1: leader confirms"]
+  isrGate{ISR meets min.insync.replicas}
+  allAck["acks=all: wait for ISR confirmations"]
+  failWrite["Write fails: NotEnoughReplicas"]
 
-**acks=0 (Fire and Forget):**
-
-```
-Producer → Broker (Leader)
-    ↓
-No response waited
-
-- No delivery confirmation
-- Possible message loss (network issues, broker crash)
-- Use case: Metrics, logs where some loss is acceptable
-```
-
-**acks=1 (Leader Only):**
-
-```
-Producer → Broker (Leader) → Ack
-                ↓
-        Async replication to followers
-
-- Confirmed when leader writes to local log
-- Risk: Leader crashes before replication → message lost
-- Use case: Balance of durability and performance
+  start --> mode
+  mode -- "0" --> noAck
+  mode -- "1" --> leaderAck
+  mode -- "all" --> isrGate
+  isrGate -- yes --> allAck
+  isrGate -- no --> failWrite
 ```
 
-**acks=all (All In-Sync Replicas):**
+**Interview-quality recommendation matrix:**
+- Logs/telemetry where minor loss is acceptable: `acks=1` (sometimes `acks=0`).
+- Business events with replay tolerance: `acks=1` + idempotent consumer logic.
+- Financial/critical state transitions: `acks=all` + `min.insync.replicas>=2` + idempotent producer.
 
-```
-Producer → Broker (Leader) → Replicate → All ISR Ack → Ack to Producer
-
-- Confirmed when all ISR replicas acknowledge
-- Combined with min.insync.replicas for strong guarantees
-- Use case: Financial transactions, critical data
-```
-
-**Combining with min.insync.replicas:**
-
-```
-Configuration:
-- replication.factor = 3
-- min.insync.replicas = 2
-- acks = all
-
-Scenarios:
-✅ ISR = [B1, B2, B3]: Write succeeds (3 >= 2)
-✅ ISR = [B1, B2]:     Write succeeds (2 >= 2)
-❌ ISR = [B1]:         Write fails NotEnoughReplicasException (1 < 2)
-```
-
-**Performance Comparison:**
-
-| Setting | Latency | Throughput | Data Safety |
-|---------|---------|------------|-------------|
-| acks=0 | ~0.5ms | Highest | None |
-| acks=1 | ~2-5ms | High | Leader only |
-| acks=all | ~5-15ms | Medium | Full (with min.insync.replicas) |
-
-**Recommendations:**
-
-| Use Case | Recommended Setting |
-|----------|---------------------|
-| Logs, metrics (loss acceptable) | acks=0 or acks=1 |
-| General application events | acks=1 |
-| Financial, orders, critical data | acks=all + min.insync.replicas=2 |
+**Common mistake:** using `acks=all` but leaving `min.insync.replicas=1`, which weakens durability assumptions.
 
 <a id="q10"></a>
 ### Q10: How does the idempotent producer work and why is it important?
 **Answer:**
 
-Idempotent producer ensures exactly-once delivery semantics by preventing duplicate messages from retries.
+Idempotent producer prevents duplicates caused by retries after uncertain delivery outcomes (for example, ack lost but write succeeded).
 
-**The Duplicate Problem:**
+```mermaid
+sequenceDiagram
+  participant Producer
+  participant Broker
 
-```
-Without Idempotence:
-1. Producer sends message
-2. Broker writes message, sends ack
-3. Ack lost (network issue)
-4. Producer retries (thinks it failed)
-5. Broker writes DUPLICATE message
+  Producer->>Broker: Init producer ID (PID)
+  Producer->>Broker: Send record PID=77 seq=10
+  Broker->>Broker: Append and store expected seq=11
+  Broker-->>Producer: Ack
 
-Result: Same message written twice
-```
-
-**How Idempotent Producer Works:**
-
-```
-With Idempotence:
-1. Producer gets Producer ID (PID) from broker
-2. Each message gets sequence number per partition
-3. Broker tracks: (PID, Partition) → last sequence number
-
-Message: {PID: 1000, Partition: 0, Sequence: 5, data: "..."}
-
-Broker logic:
-- If sequence == expected: Write and ack
-- If sequence < expected: Already received, ack without writing (dedup)
-- If sequence > expected: Out of order error
+  Producer->>Broker: Retry same PID=77 seq=10
+  Broker->>Broker: Detect duplicate sequence
+  Broker-->>Producer: Ack without duplicate append
 ```
 
-**Enabling Idempotence:**
+**How it works internally:**
+- Broker assigns producer ID (PID).
+- Producer keeps per-partition sequence numbers.
+- Broker tracks last accepted sequence per PID/partition.
+- Retries with old sequence are deduplicated.
 
-```
-Producer Config:
-enable.idempotence = true
+**What idempotence guarantees:**
+- No duplicates due to producer retries in the same producer session.
+- Ordering preserved per partition with compatible in-flight settings.
 
-// Automatically sets:
-// acks = all
-// retries = Integer.MAX_VALUE
-// max.in.flight.requests.per.connection <= 5
-```
+**What it does not guarantee alone:**
+- Cross-session or cross-partition atomicity.
+- End-to-end exactly-once across consumer side effects.
 
-**What Idempotence Guarantees:**
-
-| Guarantee | Scope |
-|-----------|-------|
-| No duplicates | Within a single producer session |
-| Ordering | Per partition (even with retries) |
-| Exactly-once | Producer to broker (not end-to-end) |
-
-**Limitations:**
-
-| Limitation | Explanation |
-|------------|-------------|
-| Single session | New producer instance = new PID = possible duplicates |
-| Producer-side only | Doesn't prevent consumer duplicates |
-| Not across partitions | Only guarantees within single partition |
-
-**When Producer Restarts:**
-
-```
-Session 1: PID=1000, Sequence=0,1,2,3... (crash)
-Session 2: PID=1001, Sequence=0,1,2,3... (new PID)
-
-- If crash happened after send but before ack
-- Message might be duplicated across sessions
-- Solution: Use transactions for cross-session guarantees
+**Recommended baseline config:**
+```properties
+enable.idempotence=true
+acks=all
+retries=2147483647
+max.in.flight.requests.per.connection=5
 ```
 
-**Idempotent vs Transactional Producer:**
+---
 
-| Feature | Idempotent | Transactional |
-|---------|------------|---------------|
-| Deduplication | ✅ | ✅ |
-| Ordering | Per partition | Per partition |
-| Atomicity | Single message | Multiple messages |
-| Cross-session | ❌ | ✅ |
-| Performance | ~Same as acks=all | Slight overhead |
+## Producer and Consumer Performance and Operations
 
 <a id="q11"></a>
 ### Q11: How do you tune producer for high throughput vs low latency?
 **Answer:**
 
-Producer tuning involves trade-offs between throughput, latency, and durability.
+Producer tuning is mostly about batching, compression, inflight concurrency, and durability level.
 
-**Key Configuration Parameters:**
+| Parameter | Throughput-oriented | Latency-oriented | Why |
+|-----------|---------------------|------------------|-----|
+| `linger.ms` | Higher (for example 20-100) | 0-5 | Wait window to accumulate batch |
+| `batch.size` | Larger | Smaller | Network efficiency vs flush speed |
+| `compression.type` | `lz4`/`zstd` | `none`/`lz4` | CPU vs bandwidth trade-off |
+| `acks` | `1` or `all` by risk | `1` usually | Confirmation cost |
+| `buffer.memory` | Larger | Moderate | Absorb spikes |
 
-| Parameter | Effect on Throughput | Effect on Latency |
-|-----------|---------------------|-------------------|
-| `batch.size` | ↑ larger = higher | ↑ larger = higher |
-| `linger.ms` | ↑ longer = higher | ↑ longer = higher |
-| `compression.type` | ↑ compression = higher | Slight increase |
-| `buffer.memory` | ↑ larger = higher | Prevents blocking |
-| `acks` | ↓ lower = higher | ↓ lower = lower |
+```mermaid
+sequenceDiagram
+  participant App
+  participant Buffer
+  participant Broker
 
-**High Throughput Configuration:**
-
-```
-# Batch more messages
-batch.size = 65536          # 64KB (default 16KB)
-linger.ms = 50              # Wait up to 50ms to fill batch
-
-# Compression
-compression.type = lz4      # or snappy, zstd
-
-# Buffer
-buffer.memory = 67108864    # 64MB
-
-# Parallelism
-max.in.flight.requests.per.connection = 5
-
-# Durability trade-off
-acks = 1                    # or 0 for maximum throughput
+  App->>Buffer: send M1
+  App->>Buffer: send M2
+  App->>Buffer: send M3
+  Note over Buffer: linger and batch.size decide flush timing
+  Buffer->>Broker: one batched produce request
 ```
 
-**Low Latency Configuration:**
+**Two profile examples:**
 
-```
-# Send immediately
-batch.size = 16384          # Smaller batches
-linger.ms = 0               # No waiting
-
-# No compression (CPU overhead)
-compression.type = none
-
-# Quick acknowledgment
-acks = 1
-
-# Fewer in-flight requests
-max.in.flight.requests.per.connection = 1
+```properties
+# High throughput profile
+linger.ms=50
+batch.size=65536
+compression.type=lz4
+acks=1
+buffer.memory=67108864
 ```
 
-**Batching Explained:**
-
-```
-linger.ms = 0:
-Messages sent immediately as individual requests
-[M1] → [M2] → [M3] → (3 network round trips)
-
-linger.ms = 50:
-Messages batched and sent together
-[M1, M2, M3] → (1 network round trip)
+```properties
+# Low latency profile
+linger.ms=0
+batch.size=16384
+compression.type=none
+acks=1
+max.in.flight.requests.per.connection=1
 ```
 
-**Compression Comparison:**
-
-| Type | Compression Ratio | CPU Usage | Speed |
-|------|-------------------|-----------|-------|
-| none | 1x | None | Fastest |
-| snappy | ~2x | Low | Fast |
-| lz4 | ~2.5x | Low | Fast |
-| gzip | ~3x | High | Slow |
-| zstd | ~3.5x | Medium | Medium |
-
-**Buffer Memory Management:**
-
-```
-buffer.memory = 32MB (default)
-
-If buffer fills up:
-- max.block.ms: How long to block before throwing exception
-- Default: 60000ms (60 seconds)
-
-Signs buffer is too small:
-- TimeoutException on send()
-- High "buffer-available-bytes" metric fluctuation
-```
-
-**Tuning Checklist:**
-
-| Goal | Settings |
-|------|----------|
-| Maximum throughput | linger.ms=100, batch.size=128KB, compression=lz4, acks=1 |
-| Minimum latency | linger.ms=0, batch.size=16KB, compression=none, acks=1 |
-| Balanced | linger.ms=5-20, batch.size=32KB, compression=snappy, acks=all |
+**Tuning workflow that works in production:**
+1. Set SLO (p95/p99 latency and max error rate).
+2. Increase batching/compression gradually.
+3. Observe `request-latency-avg`, `record-error-rate`, `buffer-available-bytes`.
+4. Rebalance when either latency SLO or broker pressure regresses.
 
 <a id="q12"></a>
 ### Q12: How do you handle consumer offset management?
 **Answer:**
 
-Offset management determines message delivery semantics and processing guarantees.
+Offset management defines delivery semantics more than almost any other consumer setting.
 
-**Offset Basics:**
+**Core rules:**
+- Commit after successful processing for at-least-once.
+- Commit before processing for at-most-once (rare for critical data).
+- For exactly-once pipelines, commit offsets in transaction with produced output.
 
-```
-Partition: [msg0][msg1][msg2][msg3][msg4][msg5]
-                              ↑
-                        committed offset = 3
-                        (messages 0-2 processed)
-```
+```mermaid
+flowchart TD
+  poll[Poll records]
+  process[Process records]
+  ok{Processing successful}
+  commit[Commit offsets]
+  retry[Retry or send to DLQ]
+  crash[Crash before commit]
+  replay[Records replay on restart]
 
-**Auto Commit vs Manual Commit:**
-
-| Auto Commit | Manual Commit |
-|-------------|---------------|
-| `enable.auto.commit=true` | `enable.auto.commit=false` |
-| Commits every `auto.commit.interval.ms` | Explicit commit call |
-| At-most-once risk | At-least-once or exactly-once |
-| Simpler code | Full control |
-
-**Auto Commit Risks:**
-
-```
-Auto Commit Scenario:
-1. Poll messages [5, 6, 7]
-2. Auto-commit fires → offset=8
-3. Processing message 6 → crash!
-4. Restart → reads from offset 8
-5. Messages 6, 7 LOST (at-most-once)
+  poll --> process
+  process --> ok
+  ok -- yes --> commit
+  ok -- no --> retry
+  process --> crash
+  crash --> replay
 ```
 
-**Manual Commit Strategies:**
+**Commit strategies:**
 
-**1. Synchronous Commit (Safest):**
-```
-while (true) {
-    messages = consumer.poll()
-    for (msg in messages) {
-        process(msg)
-    }
-    consumer.commitSync()  // Blocks until confirmed
+| Strategy | Pros | Cons | Typical Use |
+|----------|------|------|-------------|
+| Auto commit | Simple | Can lose unprocessed records | Non-critical consumers |
+| `commitSync()` | Stronger safety | Higher latency | Critical pipelines |
+| `commitAsync()` | Better throughput | Commit error handling complexity | High-throughput consumers |
+| Per-batch commit | Good balance | Possible duplicate batch replay | Most production services |
+
+**Rebalance-safe pattern:**
+```java
+while (running) {
+    var records = consumer.poll(Duration.ofMillis(500));
+    processBatch(records);
+    consumer.commitSync();
 }
-// At-least-once: Message processed before commit
 ```
 
-**2. Asynchronous Commit (Better throughput):**
-```
-while (true) {
-    messages = consumer.poll()
-    for (msg in messages) {
-        process(msg)
-    }
-    consumer.commitAsync()  // Non-blocking
-}
-// Risk: Commit might fail silently
-```
-
-**3. Commit Per Message (Fine-grained):**
-```
-while (true) {
-    messages = consumer.poll()
-    for (msg in messages) {
-        process(msg)
-        consumer.commitSync(msg.offset + 1)  // Commit after each
-    }
-}
-// Highest overhead, most granular control
-```
-
-**4. Commit Per Batch:**
-```
-while (true) {
-    messages = consumer.poll()
-    process_batch(messages)
-    consumer.commitSync()  // Commit after batch
-}
-// Balance of safety and performance
-```
-
-**Seeking to Specific Offsets:**
-
-| Method | Use Case |
-|--------|----------|
-| `seekToBeginning()` | Reprocess all messages |
-| `seekToEnd()` | Skip to latest, ignore backlog |
-| `seek(partition, offset)` | Resume from specific point |
-| `offsetsForTimes()` | Find offset by timestamp |
-
-**auto.offset.reset Settings:**
-
-| Setting | Behavior | Use Case |
-|---------|----------|----------|
-| `earliest` | Start from beginning | New consumer, need all data |
-| `latest` | Start from end | Only want new messages |
-| `none` | Throw exception | Explicit offset management |
-
-**Delivery Semantics Summary:**
-
-| Semantics | How to Achieve |
-|-----------|----------------|
-| At-most-once | Auto-commit or commit before processing |
-| At-least-once | Manual commit after processing |
-| Exactly-once | Transactions + idempotent processing |
+**Important timeout alignment:** ensure processing time stays under `max.poll.interval.ms`, otherwise group coordinator evicts the consumer and triggers rebalances.
 
 <a id="q13"></a>
 ### Q13: What is consumer lag and how do you handle it?
 **Answer:**
 
-Consumer lag is the difference between the latest message offset and the consumer's committed offset.
+Consumer lag = `logEndOffset - committedOffset` per partition. Growing lag means consumers cannot keep up with produce rate.
 
-**Understanding Lag:**
+```mermaid
+flowchart TD
+  detect[Lag breach detected]
+  checkRate{Producer rate > consumer rate}
+  scale[Scale consumers up to partition count]
+  optimize[Optimize processing and downstream I/O]
+  fetchTune[Tune fetch and batch settings]
+  rebalanceCheck[Inspect rebalance churn and GC pauses]
+  emergency[Emergency: skip to recent offsets for non-critical backlogs]
 
-```
-Partition:    [0][1][2][3][4][5][6][7][8][9]
-                            ↑           ↑
-                     Consumer Offset   Latest Offset
-                         (5)              (9)
-                         
-Consumer Lag = 9 - 5 = 4 messages behind
-```
-
-**Causes of Consumer Lag:**
-
-| Cause | Description |
-|-------|-------------|
-| Slow processing | Consumer can't keep up with production rate |
-| Consumer downtime | Consumer offline, messages accumulate |
-| Rebalancing | Partitions reassigned during rebalance |
-| Network issues | Slow fetches from broker |
-| GC pauses | Long garbage collection stops processing |
-
-**Monitoring Lag:**
-
-```bash
-# Kafka CLI
-kafka-consumer-groups.sh --describe --group my-group
-
-GROUP     TOPIC     PARTITION  CURRENT-OFFSET  LOG-END-OFFSET  LAG
-my-group  orders    0          1000            1050            50
-my-group  orders    1          2000            2000            0
-my-group  orders    2          1500            1600            100
+  detect --> checkRate
+  checkRate -- yes --> scale
+  checkRate -- no --> rebalanceCheck
+  scale --> optimize
+  optimize --> fetchTune
+  rebalanceCheck --> optimize
+  fetchTune --> emergency
 ```
 
-**Key Metrics:**
+**Typical root causes:**
+- Under-provisioned consumer instances.
+- Slow downstream systems (DB/API bottlenecks).
+- Frequent rebalances and long stop-the-world pauses.
+- Hot partitions due to poor key distribution.
 
-| Metric | Description |
-|--------|-------------|
-| `records-lag` | Messages behind per partition |
-| `records-lag-max` | Maximum lag across partitions |
-| `records-consumed-rate` | Consumption throughput |
-| `fetch-rate` | Fetch requests per second |
+**Metrics to watch together (not in isolation):**
+- `records-lag-max`
+- `records-consumed-rate`
+- `fetch-latency-avg`
+- rebalance frequency and duration
 
-**Handling Lag:**
-
-**1. Scale Consumers (Horizontal):**
-```
-Before: 1 consumer → 6 partitions (overloaded)
-After:  6 consumers → 6 partitions (1:1 mapping)
-
-Note: Consumers cannot exceed partition count
-```
-
-**2. Optimize Processing:**
-```
-- Batch processing instead of per-message
-- Async I/O for external calls
-- Parallel processing within consumer
-- Reduce processing time per message
-```
-
-**3. Increase Fetch Size:**
-```
-fetch.min.bytes = 1048576      # 1MB minimum fetch
-fetch.max.wait.ms = 500        # Wait up to 500ms
-max.partition.fetch.bytes = 1048576  # Per partition
-```
-
-**4. Handle Backpressure:**
-```
-- Pause consumption when downstream is slow
-- consumer.pause(partitions)
-- consumer.resume(partitions) when ready
-```
-
-**5. Skip or Sample (Emergency):**
-```
-- Seek to end: consumer.seekToEnd(partitions)
-- Process only recent: seek to timestamp
-- Sample messages (process every Nth)
-```
-
-**Lag Alerting Thresholds:**
-
-| Lag Level | Action |
-|-----------|--------|
-| < 1000 | Normal operation |
-| 1000 - 10000 | Warning, investigate |
-| 10000 - 100000 | Critical, scale consumers |
-| > 100000 | Emergency, consider skipping |
-
-**Prevention:**
-
-| Strategy | Implementation |
-|----------|----------------|
-| Right-size partitions | More partitions = more parallelism |
-| Capacity planning | Monitor and scale proactively |
-| Auto-scaling | Scale consumers based on lag metrics |
-| Circuit breakers | Prevent cascade failures |
+**Operational guidance:**
+- Scale partition count and consumer count together over time.
+- Implement backpressure and pause/resume when downstream fails.
+- Use lag-based autoscaling with guardrails to avoid oscillation.
 
 <a id="q14"></a>
 ### Q14: What are the partition assignment strategies?
 **Answer:**
 
-Partition assignment strategies determine how partitions are distributed among consumers in a group.
+Assignment strategy defines how partitions are distributed in a consumer group and how disruptive rebalances are.
 
-**Built-in Strategies:**
+| Strategy | Distribution | Rebalance Cost | Good For |
+|----------|--------------|----------------|----------|
+| Range | Can be uneven | High | Partition-number locality across topics |
+| RoundRobin | Even | High | Simple balanced stateless workloads |
+| Sticky | Even and stable | Medium | Stateful consumers with local caches |
+| CooperativeSticky | Even and incremental | Low | Most production groups |
 
-**1. Range Assignment (Default):**
+```mermaid
+flowchart TB
+  change[Consumer joins or leaves]
+  eager[Eager rebalance]
+  coop[Cooperative sticky rebalance]
+  revokeAll[Revoke all partitions]
+  revokeSome[Revoke only moving partitions]
+  pauseAll[All consumers pause work]
+  partialPause[Only affected partitions pause]
 
-```
-Topics: T1 (3 partitions), T2 (3 partitions)
-Consumers: C1, C2
-
-Assignment:
-C1 → T1-P0, T1-P1, T2-P0, T2-P1
-C2 → T1-P2, T2-P2
-
-Pros: Co-locates same partition numbers across topics
-Cons: Uneven distribution possible
-```
-
-**2. RoundRobin Assignment:**
-
-```
-Topics: T1 (3 partitions), T2 (3 partitions)
-Consumers: C1, C2
-
-All partitions sorted, distributed round-robin:
-C1 → T1-P0, T1-P2, T2-P1
-C2 → T1-P1, T2-P0, T2-P2
-
-Pros: Even distribution
-Cons: No partition affinity across topics
+  change --> eager
+  change --> coop
+  eager --> revokeAll --> pauseAll
+  coop --> revokeSome --> partialPause
 ```
 
-**3. Sticky Assignment:**
+**Advanced production knobs:**
+- `partition.assignment.strategy=org.apache.kafka.clients.consumer.CooperativeStickyAssignor`
+- `group.instance.id` for static membership to reduce churn on rolling deploys.
 
-```
-Initial:
-C1 → P0, P1, P2
-C2 → P3, P4, P5
+**Interview nuance:** strategy choice is not only about fairness; it is also about minimizing movement cost and cache warmup penalties.
 
-C2 leaves (rebalance):
-C1 → P0, P1, P2, P3, P4, P5  (keeps original + gets C2's)
+---
 
-C2 rejoins (rebalance):
-C1 → P0, P1, P2  (keeps original)
-C2 → P3, P4, P5  (gets back its partitions)
-
-Pros: Minimizes partition movement during rebalance
-Cons: Slightly more complex
-```
-
-**4. Cooperative Sticky (Incremental Rebalance):**
-
-```
-Traditional Rebalance:
-1. All consumers stop
-2. All partitions revoked
-3. Reassignment calculated
-4. All partitions assigned
-→ Full stop-the-world
-
-Cooperative Rebalance:
-1. Calculate new assignment
-2. Only revoke partitions that need to move
-3. Assign revoked partitions to new owners
-→ Minimal disruption
-```
-
-**Comparison:**
-
-| Strategy | Distribution | Rebalance Impact | Use Case |
-|----------|--------------|------------------|----------|
-| Range | May be uneven | High | Co-located processing |
-| RoundRobin | Even | High | Simple, even load |
-| Sticky | Even | Medium | Stateful consumers |
-| CooperativeSticky | Even | Low | Production recommended |
-
-**Rebalance Impact:**
-
-```
-Traditional (Eager):
-Time: ──────[STOP]──────[REBALANCE]──────[RESUME]──────
-             ↑ all processing stops       ↑ all resume
-
-Cooperative (Incremental):
-C1:   ──────────────────────────────────────────────
-C2:   ──────[revoke P3]──────────────────────────────
-C3:   ─────────────────────[assign P3]───────────────
-             ↑ only affected partitions stop
-```
-
-**Configuration:**
-
-```
-# Consumer config
-partition.assignment.strategy = 
-    org.apache.kafka.clients.consumer.CooperativeStickyAssignor
-
-# Multiple strategies (fallback)
-partition.assignment.strategy = 
-    org.apache.kafka.clients.consumer.CooperativeStickyAssignor,
-    org.apache.kafka.clients.consumer.RangeAssignor
-```
-
-**Choosing a Strategy:**
-
-| Scenario | Recommended Strategy |
-|----------|---------------------|
-| Simple workloads | RoundRobin |
-| Stateful processing (local cache) | Sticky |
-| Large consumer groups | CooperativeSticky |
-| Minimize downtime | CooperativeSticky |
-| Cross-topic partition affinity | Range |
+## Failures, Guarantees, and Exactly-Once (continued)
 
 <a id="q15"></a>
 ### Q15: How do Kafka transactions work for exactly-once semantics?
 **Answer:**
 
-Kafka transactions enable atomic writes across multiple partitions and exactly-once semantics for stream processing.
+Kafka transactions atomically combine multiple writes and optional consumer offset commits, enabling exactly-once processing in consume-transform-produce pipelines.
 
-**Transaction Guarantees:**
+```mermaid
+sequenceDiagram
+  participant Consumer
+  participant TxProducer as TransactionalProducer
+  participant Input as InputTopic
+  participant Output as OutputTopic
+  participant Coordinator as TxCoordinator
 
-| Guarantee | Description |
-|-----------|-------------|
-| Atomicity | All messages in transaction succeed or all fail |
-| Cross-partition | Atomic writes to multiple partitions |
-| Exactly-once | No duplicates even across producer restarts |
-| Read committed | Consumers only see committed messages |
-
-**Transaction Flow:**
-
-```
-1. Producer: beginTransaction()
-2. Producer: send(topic1, message1)
-3. Producer: send(topic2, message2)
-4. Producer: sendOffsetsToTransaction(offsets)  // For consume-transform-produce
-5. Producer: commitTransaction() or abortTransaction()
-
-Broker:
-- Messages written with "uncommitted" marker
-- On commit: marker changed to "committed"
-- On abort: messages ignored by consumers
+  Consumer->>Input: Poll records
+  TxProducer->>Coordinator: beginTransaction
+  TxProducer->>Output: Produce transformed records
+  TxProducer->>Coordinator: sendOffsetsToTransaction
+  TxProducer->>Coordinator: commitTransaction
+  Coordinator-->>Output: Write commit markers
 ```
 
-**Transactional Producer Setup:**
-
-```
-# Producer configuration
-transactional.id = my-transactional-producer  # Required, must be unique
-enable.idempotence = true                     # Automatically enabled
-acks = all                                    # Automatically set
-```
-
-**Transactional Consumer Setup:**
-
-```
-# Consumer configuration
-isolation.level = read_committed  # Only see committed messages
-
-# Alternative
-isolation.level = read_uncommitted  # See all messages (default)
+```mermaid
+stateDiagram-v2
+  [*] --> Ready
+  Ready --> InTransaction: beginTransaction
+  InTransaction --> CommitPending: commitTransaction
+  CommitPending --> Ready: commit complete
+  InTransaction --> AbortPending: abortTransaction
+  AbortPending --> Ready: abort complete
 ```
 
-**Consume-Transform-Produce Pattern:**
+**Required settings:**
+```properties
+# Producer
+transactional.id=orders-tx-producer-1
+enable.idempotence=true
+acks=all
 
-```
-Transaction Scope:
-┌─────────────────────────────────────────────────┐
-│ 1. Consume from input topic                     │
-│ 2. Process/Transform                            │
-│ 3. Produce to output topic                      │
-│ 4. Commit consumer offsets                      │
-│                                                 │
-│ All atomic - either all succeed or all rollback │
-└─────────────────────────────────────────────────┘
+# Consumer
+isolation.level=read_committed
 ```
 
-**Transaction States:**
+**What this guarantees:**
+- Output records and consumed offsets are committed together or not at all.
+- Consumers with `read_committed` do not see aborted records.
 
-```
-Empty → Initializing → Ready → InTransaction → CommittingTransaction → Ready
-                                    ↓
-                         AbortingTransaction → Ready
-```
+**Trade-offs:**
+- Extra latency and coordinator overhead.
+- Need strong operational discipline around producer identity and transaction timeouts.
 
-**Exactly-Once Semantics (EOS):**
+---
 
-| Level | Scope | How |
-|-------|-------|-----|
-| Idempotent Producer | Single partition | PID + sequence number |
-| Transactions | Multiple partitions | Transaction coordinator |
-| EOS in Streams | End-to-end | Consume + process + produce atomic |
-
-**Failure Scenarios:**
-
-| Failure | Transaction Behavior |
-|---------|---------------------|
-| Producer crash before commit | Transaction times out, aborted |
-| Producer crash after commit started | Coordinator completes commit |
-| Broker crash | Transaction log replicated, recovery continues |
-| Network partition | Transaction timeout, abort |
-
-**Transaction Timeout:**
-
-```
-transaction.timeout.ms = 60000  # Default 1 minute
-
-If transaction not completed within timeout:
-- Coordinator aborts transaction
-- Producer gets InvalidProducerEpoch on next operation
-- Must reinitialize producer
-```
-
-**Performance Considerations:**
-
-| Aspect | Impact |
-|--------|--------|
-| Latency | ~10-20ms overhead per transaction |
-| Throughput | Batch multiple messages per transaction |
-| Storage | Transaction markers stored in log |
-
-**When to Use Transactions:**
-
-| Use Case | Need Transactions? |
-|----------|-------------------|
-| Log aggregation | No |
-| Metrics collection | No |
-| Stream processing (exactly-once) | Yes |
-| Financial operations | Yes |
-| Multi-topic atomic writes | Yes |
+## Schema, Security, and Observability
 
 <a id="q16"></a>
 ### Q16: What is Schema Registry and why is it important?
 **Answer:**
 
-Schema Registry is a centralized service for managing and validating message schemas, enabling schema evolution without breaking consumers.
+Schema Registry centralizes schema definitions and compatibility checks so producers and consumers can evolve independently without breaking each other.
 
-**Why Schema Registry:**
+```mermaid
+sequenceDiagram
+  participant Producer
+  participant Registry as SchemaRegistry
+  participant Topic
+  participant Consumer
 
-```
-Without Schema Registry:
-Producer → {"name": "John", "age": 30} → Consumer
-Producer → {"name": "John", "years": 30} → Consumer ❌ (breaking change)
-
-With Schema Registry:
-Producer → [schema-id][binary data] → Consumer
-           ↓
-    Schema Registry validates compatibility
-```
-
-**Key Concepts:**
-
-| Concept | Description |
-|---------|-------------|
-| Schema | Structure definition (Avro, Protobuf, JSON Schema) |
-| Subject | Name under which schema is registered (usually topic-name-value) |
-| Version | Sequential version number for schema evolution |
-| Schema ID | Global unique identifier for a schema |
-| Compatibility | Rules for schema evolution |
-
-**How It Works:**
-
-```
-1. Producer registers schema (if new):
-   POST /subjects/orders-value/versions
-   → Returns schema_id: 42
-
-2. Producer serializes message:
-   [Magic Byte][Schema ID: 42][Avro Binary Data]
-
-3. Consumer deserializes:
-   - Reads schema_id from message
-   - Fetches schema from registry (cached)
-   - Deserializes using schema
+  Producer->>Registry: Register schema (if new)
+  Registry-->>Producer: schema ID
+  Producer->>Topic: Write record with schema ID
+  Consumer->>Topic: Read record
+  Consumer->>Registry: Fetch schema by ID (cached)
+  Registry-->>Consumer: Schema payload
+  Consumer->>Consumer: Deserialize safely
 ```
 
-**Compatibility Modes:**
+**Why it matters in real teams:**
+- Prevents accidental breaking changes during independent deploys.
+- Reduces payload size with binary formats (Avro/Protobuf).
+- Provides auditable schema history.
 
-| Mode | Allowed Changes | Use Case |
-|------|-----------------|----------|
-| BACKWARD | Delete fields, add optional fields | Default, safe |
-| FORWARD | Add fields, delete optional fields | Producer-first deploys |
-| FULL | Add/delete optional fields only | Strictest evolution |
-| NONE | Any change | Development only |
+**Compatibility modes (simplified):**
 
-**Compatibility Examples (Avro):**
+| Mode | Safe Direction | Typical Rule |
+|------|----------------|--------------|
+| BACKWARD | New consumer reads old data | Add optional fields with defaults |
+| FORWARD | Old consumer reads new data | Avoid removing required fields abruptly |
+| FULL | Both directions | Strictest contract discipline |
+| NONE | No check | Local/dev only |
 
-```
-BACKWARD Compatible (consumer can read old with new schema):
-v1: {name: string, age: int}
-v2: {name: string, age: int, email: string = ""} ✅ (default provided)
-
-BACKWARD Incompatible:
-v1: {name: string, age: int}
-v2: {name: string, age: int, email: string} ❌ (required field added)
-
-FORWARD Compatible (consumer can read new with old schema):
-v1: {name: string, age: int, email: string}
-v2: {name: string, age: int} ✅ (field removed)
-```
-
-**Schema Evolution Best Practices:**
-
-| Do | Don't |
-|----|-------|
-| Add fields with defaults | Add required fields |
-| Use optional/nullable fields | Remove required fields |
-| Use union types for flexibility | Change field types |
-| Plan schema from start | Rename fields |
-
-**Serialization Formats:**
-
-| Format | Binary | Schema Evolution | Performance |
-|--------|--------|------------------|-------------|
-| Avro | Yes | Excellent | Fast |
-| Protobuf | Yes | Excellent | Fast |
-| JSON Schema | No | Limited | Slower |
-
-**Subject Naming Strategies:**
-
-| Strategy | Subject Name | Use Case |
-|----------|--------------|----------|
-| TopicName | `<topic>-value` | Default, simple |
-| RecordName | `<record-name>` | Share schema across topics |
-| TopicRecordName | `<topic>-<record>` | Multiple record types per topic |
-
-**Benefits:**
-
-| Benefit | Description |
-|---------|-------------|
-| Decoupling | Producers/consumers evolve independently |
-| Validation | Prevent incompatible schemas |
-| Documentation | Central schema catalog |
-| Efficiency | Binary serialization (Avro/Protobuf) |
-| Versioning | Track schema history |
+**Rollout best practice:**
+1. Use backward-compatible change first.
+2. Deploy consumers before producers for additive fields.
+3. Monitor deserialization failures as release health signal.
 
 <a id="q17"></a>
 ### Q17: How do you configure Kafka security?
 **Answer:**
 
-Kafka security covers authentication, authorization, and encryption.
+Kafka security is a combination of encryption, authentication, and authorization. All three are needed in production.
 
-**Security Components:**
+```mermaid
+flowchart LR
+  subgraph clients [Clients]
+    producer[Producer]
+    consumer[Consumer]
+    admin[Admin Client]
+  end
 
-| Component | Purpose | Mechanisms |
-|-----------|---------|------------|
-| Authentication | Verify identity | SASL, SSL/TLS client certs |
-| Authorization | Control access | ACLs |
-| Encryption | Protect data | SSL/TLS (transit), custom (at rest) |
+  subgraph kafkaSec [Kafka Cluster]
+    broker[Broker listener SASL_SSL]
+    authorizer[ACL Authorizer]
+  end
 
-**Authentication Mechanisms:**
-
-**1. SASL/PLAIN (Username/Password):**
+  producer -->|TLS + SASL| broker
+  consumer -->|TLS + SASL| broker
+  admin -->|TLS + SASL| broker
+  broker --> authorizer
 ```
+
+**Recommended production baseline:**
+- Transport: `SASL_SSL` (TLS + identity)
+- Auth mechanism: SCRAM-SHA-256/512 or mTLS/Kerberos depending on environment
+- Authorization: ACLs with least privilege
+- Secrets: external secret manager + rotation policy
+
+**Example settings:**
+```properties
 # Broker
-listeners=SASL_PLAINTEXT://localhost:9092
-sasl.enabled.mechanisms=PLAIN
-sasl.mechanism.inter.broker.protocol=PLAIN
+listeners=SASL_SSL://0.0.0.0:9093
+sasl.enabled.mechanisms=SCRAM-SHA-512
+authorizer.class.name=org.apache.kafka.metadata.authorizer.StandardAuthorizer
+allow.everyone.if.no.acl.found=false
 
 # Client
-security.protocol=SASL_PLAINTEXT
-sasl.mechanism=PLAIN
-sasl.jaas.config=org.apache.kafka.common.security.plain.PlainLoginModule required \
-    username="client" password="client-secret";
+security.protocol=SASL_SSL
+sasl.mechanism=SCRAM-SHA-512
 ```
 
-**2. SASL/SCRAM (Salted Challenge Response):**
-```
-# More secure than PLAIN (password not sent in clear)
-sasl.enabled.mechanisms=SCRAM-SHA-256,SCRAM-SHA-512
-```
-
-**3. SASL/GSSAPI (Kerberos):**
-```
-# Enterprise environments with existing Kerberos infrastructure
-sasl.enabled.mechanisms=GSSAPI
-sasl.kerberos.service.name=kafka
-```
-
-**4. mTLS (Mutual TLS):**
-```
-# Client authentication via certificates
-ssl.client.auth=required
-ssl.keystore.location=/path/to/keystore.jks
-ssl.truststore.location=/path/to/truststore.jks
-```
-
-**Encryption in Transit (TLS):**
-
-```
-# Broker configuration
-listeners=SSL://localhost:9093
-ssl.keystore.location=/path/to/kafka.server.keystore.jks
-ssl.keystore.password=keystore-password
-ssl.key.password=key-password
-ssl.truststore.location=/path/to/kafka.server.truststore.jks
-ssl.truststore.password=truststore-password
-
-# Client configuration
-security.protocol=SSL
-ssl.truststore.location=/path/to/client.truststore.jks
-ssl.truststore.password=truststore-password
-```
-
-**Authorization (ACLs):**
-
+**ACL examples:**
 ```bash
-# Grant producer access
-kafka-acls.sh --add --allow-principal User:producer1 \
-    --operation Write --topic orders
+# Producer write permission
+kafka-acls.sh --add --allow-principal User:producer1 --operation Write --topic orders
 
-# Grant consumer access
-kafka-acls.sh --add --allow-principal User:consumer1 \
-    --operation Read --topic orders \
-    --group order-processors
-
-# Grant admin access
-kafka-acls.sh --add --allow-principal User:admin \
-    --operation All --topic '*'
+# Consumer read permission
+kafka-acls.sh --add --allow-principal User:consumer1 --operation Read --topic orders --group order-processors
 ```
 
-**ACL Operations:**
-
-| Operation | Description |
-|-----------|-------------|
-| Read | Consume from topic |
-| Write | Produce to topic |
-| Create | Create topics |
-| Delete | Delete topics |
-| Alter | Modify topic config |
-| Describe | View topic metadata |
-| ClusterAction | Cluster-level operations |
-| All | All operations |
-
-**Security Protocols:**
-
-| Protocol | Authentication | Encryption |
-|----------|----------------|------------|
-| PLAINTEXT | None | None |
-| SSL | Optional (mTLS) | Yes |
-| SASL_PLAINTEXT | SASL | None |
-| SASL_SSL | SASL | Yes |
-
-**Encryption at Rest:**
-
-```
-# Kafka doesn't provide native at-rest encryption
-# Options:
-1. Filesystem encryption (dm-crypt, LUKS)
-2. Cloud provider encryption (AWS EBS, GCP PD)
-3. Application-level encryption (encrypt before produce)
-```
-
-**Security Best Practices:**
-
-| Practice | Recommendation |
-|----------|----------------|
-| Protocol | Use SASL_SSL in production |
-| Authentication | SCRAM or Kerberos (not PLAIN) |
-| ACLs | Principle of least privilege |
-| Certificates | Rotate regularly |
-| Secrets | Use vault/secrets manager |
-| Network | Isolate Kafka in private network |
+**Common mistake:** enabling TLS but keeping broad wildcard ACLs, which leaves data exposed to authenticated-but-unauthorized principals.
 
 <a id="q18"></a>
 ### Q18: What are the key Kafka metrics to monitor?
 **Answer:**
 
-Monitoring Kafka involves broker, producer, consumer, and topic-level metrics.
+You need a layered view: cluster health, broker performance, producer health, consumer lag, and infrastructure saturation.
 
-**Critical Broker Metrics:**
+```mermaid
+flowchart LR
+  jmx[Kafka JMX Metrics]
+  exporter[JMX Exporter]
+  prometheus[Prometheus]
+  grafana[Grafana Dashboards]
+  alerts[Alertmanager]
+  oncall[On-call]
 
-| Metric | Description | Alert Threshold |
-|--------|-------------|-----------------|
-| UnderReplicatedPartitions | Partitions not fully replicated | > 0 |
-| OfflinePartitionsCount | Partitions without leader | > 0 |
-| ActiveControllerCount | Should be 1 per cluster | != 1 |
-| RequestHandlerAvgIdlePercent | Handler thread utilization | < 0.3 (70% utilized) |
-
-**Broker Performance Metrics:**
-
-| Metric | Description | Healthy Range |
-|--------|-------------|---------------|
-| MessagesInPerSec | Incoming message rate | Depends on workload |
-| BytesInPerSec | Incoming byte rate | < network capacity |
-| BytesOutPerSec | Outgoing byte rate | < network capacity |
-| RequestsPerSec | Request rate by type | Stable baseline |
-| TotalTimeMs | Request latency (produce, fetch) | < 100ms |
-
-**Producer Metrics:**
-
-| Metric | Description | What to Watch |
-|--------|-------------|---------------|
-| record-send-rate | Messages sent per second | Throughput |
-| record-error-rate | Failed sends per second | Should be ~0 |
-| request-latency-avg | Average request time | Latency SLA |
-| batch-size-avg | Average batch size | Batching efficiency |
-| buffer-available-bytes | Free buffer memory | Not approaching 0 |
-| record-queue-time-avg | Time in buffer | Backpressure indicator |
-
-**Consumer Metrics:**
-
-| Metric | Description | What to Watch |
-|--------|-------------|---------------|
-| records-lag | Messages behind per partition | Growing lag |
-| records-lag-max | Maximum lag across partitions | Alert threshold |
-| records-consumed-rate | Consumption throughput | Match production rate |
-| fetch-latency-avg | Fetch request latency | Network/broker issues |
-| commit-latency-avg | Offset commit latency | Commit performance |
-| rebalance-latency-avg | Time spent in rebalance | Stability |
-
-**Consumer Group Lag Monitoring:**
-
-```bash
-# CLI check
-kafka-consumer-groups.sh --describe --group my-group
-
-# Key columns:
-# - CURRENT-OFFSET: Consumer position
-# - LOG-END-OFFSET: Latest message
-# - LAG: Difference (messages behind)
-
-# JMX metric path
-kafka.consumer:type=consumer-fetch-manager-metrics,
-    client-id=*,topic=*,partition=*
-    records-lag
+  jmx --> exporter --> prometheus
+  prometheus --> grafana
+  prometheus --> alerts --> oncall
 ```
 
-**Topic/Partition Metrics:**
+**Critical cluster metrics:**
 
-| Metric | Description |
-|--------|-------------|
-| Size | Disk usage per partition |
-| MessageCount | Messages in partition |
-| LogStartOffset | Earliest available offset |
-| LogEndOffset | Latest offset |
+| Metric | Why It Matters | Alert Hint |
+|--------|----------------|-----------|
+| `UnderReplicatedPartitions` | Replica safety degraded | Alert when > 0 for sustained period |
+| `OfflinePartitionsCount` | Data unavailable for some partitions | Critical when > 0 |
+| `ActiveControllerCount` | Controller health | Should be exactly 1 |
+| Request latency (`TotalTimeMs` by API) | End-user impact | Alert on p95/p99 SLO breach |
 
-**ZooKeeper Metrics (if applicable):**
+**Producer/consumer metrics:**
 
-| Metric | Description | Alert |
-|--------|-------------|-------|
-| AvgRequestLatency | ZK request latency | > 100ms |
-| OutstandingRequests | Pending requests | Growing |
-| NumAliveConnections | Connected clients | Dropping |
-
-**Monitoring Stack:**
-
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Kafka JMX     │ → │   Prometheus    │ → │    Grafana      │
-│   Metrics       │    │   (scraping)    │    │   (dashboards)  │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-
-Alternative: Kafka → JMX Exporter → Prometheus → Grafana
-Alternative: Kafka → Datadog Agent → Datadog
-```
-
-**Key Alerts to Configure:**
-
-| Alert | Condition | Severity |
-|-------|-----------|----------|
-| Under-replicated partitions | > 0 for 5 min | Critical |
-| Offline partitions | > 0 | Critical |
-| Consumer lag | > threshold | Warning/Critical |
-| Broker down | ActiveControllerCount != 1 | Critical |
-| High request latency | p99 > SLA | Warning |
-| Disk usage | > 80% | Warning |
-| Producer errors | error-rate > 0 | Warning |
-
-**Dashboard Essentials:**
-
-| Panel | Metrics |
+| Layer | Metrics |
 |-------|---------|
-| Cluster Health | Active controllers, under-replicated, offline |
-| Throughput | Messages/bytes in/out per broker |
-| Latency | Produce/fetch request latency p50, p99 |
-| Consumer Lag | Lag by consumer group and topic |
-| Resources | CPU, memory, disk, network per broker |
+| Producer | `record-error-rate`, `request-latency-avg`, `record-retry-rate`, `buffer-available-bytes` |
+| Consumer | `records-lag-max`, `fetch-latency-avg`, `records-consumed-rate`, rebalance duration |
+
+**SLO-driven monitoring approach:**
+1. Define service SLOs (delivery latency, data freshness, loss tolerance).
+2. Map SLOs to Kafka and app metrics.
+3. Alert on sustained symptoms, not single spikes.
+4. Add runbooks for top incidents (lag growth, ISR shrink, broker down).
 
 ---
 
-Good luck with your interview! 🚀
+Good luck with your interview!

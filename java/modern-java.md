@@ -26,88 +26,70 @@
 <a id="q1"></a>
 ### Q1: What is the Stream API and how does it work?
 **Answer:**
-The Stream API (Java 8+) provides a functional approach to processing collections.
+Stream API provides a declarative way to process data sequences with pipeline operations.
 
-**Key characteristics:**
-- **Not a data structure**: Doesn't store data, operates on a source
-- **Lazy evaluation**: Intermediate operations are not executed until terminal operation
-- **Consumable**: Can only be traversed once
+Key characteristics:
+- **Not a data structure**: it operates on a source (`Collection`, array, generator).
+- **Lazy intermediate steps**: work is deferred until terminal operation.
+- **Single-use**: a stream cannot be reused after terminal execution.
+- **Composable pipeline**: build transformations clearly from source to result.
 
 ```java
-List<String> names = Arrays.asList("Alice", "Bob", "Charlie", "David");
+List<String> names = List.of("Alice", "Bob", "Charlie", "David");
 
-List<String> result = names.stream()           // Create stream
-    .filter(name -> name.length() > 3)         // Intermediate
-    .map(String::toUpperCase)                  // Intermediate
-    .sorted()                                  // Intermediate
-    .collect(Collectors.toList());             // Terminal
-// Result: [ALICE, CHARLIE, DAVID]
+List<String> result = names.stream()
+    .filter(name -> name.length() > 3)
+    .map(String::toUpperCase)
+    .sorted()
+    .toList();
 ```
 
-**Creating streams:**
-```java
-Stream<String> stream1 = list.stream();
-Stream<String> stream2 = Arrays.stream(arr);
-Stream<String> stream3 = Stream.of("a", "b", "c");
-IntStream intStream = IntStream.range(1, 10);  // 1-9
-```
+**Performance note:** Stream readability often improves business logic, but avoid over-chaining for very hot loops where plain loops may be faster and easier to profile.
 
 <a id="q2"></a>
 ### Q2: What are intermediate and terminal operations?
 **Answer:**
-
 | Intermediate Operations | Terminal Operations |
 |------------------------|---------------------|
-| Return a Stream | Return non-Stream result |
-| Lazy (not executed immediately) | Trigger stream processing |
-| filter, map, flatMap, sorted | collect, forEach, reduce, count |
+| Return another Stream | Produce final result or side effect |
+| Usually lazy | Trigger evaluation |
+| `filter`, `map`, `flatMap`, `sorted`, `distinct` | `collect`, `reduce`, `forEach`, `count`, `findFirst` |
 
-**Intermediate:**
+Important execution behavior:
+- Pipelines are fused; elements typically flow through all stages one by one.
+- Short-circuit terminals (`findFirst`, `anyMatch`) can stop early.
+
 ```java
-numbers.stream()
-    .filter(n -> n % 2 == 0)  // keep even
-    .map(n -> n * 2)          // double
-    .sorted()                 // sort
-    .distinct()               // remove duplicates
-    .limit(5)                 // take first 5
-    .skip(2);                 // skip first 2
+boolean found = numbers.stream()
+    .filter(n -> n > 10)
+    .anyMatch(n -> n % 2 == 0); // may stop before scanning full stream
 ```
 
-**Terminal:**
-```java
-List<Integer> list = stream.collect(Collectors.toList());
-stream.forEach(System.out::println);
-int sum = stream.reduce(0, Integer::sum);
-long count = stream.count();
-boolean hasEven = stream.anyMatch(n -> n % 2 == 0);
-Optional<Integer> first = stream.findFirst();
-```
+**Pitfall:** side effects in intermediate operations (`peek`, mutable shared state) make pipelines brittle and hard to parallelize safely.
 
 <a id="q3"></a>
 ### Q3: What is the difference between map() and flatMap()?
 **Answer:**
-
-| map() | flatMap() |
-|-------|-----------|
-| One-to-one transformation | One-to-many transformation |
-| Returns single value per element | Returns stream per element, flattens result |
+| `map()` | `flatMap()` |
+|---------|-------------|
+| One input -> one output | One input -> many outputs (stream) |
+| Keeps nesting | Flattens nested streams |
+| Use for simple transformation | Use for nested collections/Optionals |
 
 ```java
-List<String> words = Arrays.asList("hello", "world");
+List<String> words = List.of("hello", "world");
 
-// map creates nested structure
 List<List<String>> nested = words.stream()
-    .map(word -> Arrays.asList(word.split("")))
-    .collect(Collectors.toList());
-// [[h, e, l, l, o], [w, o, r, l, d]]
+    .map(w -> Arrays.asList(w.split("")))
+    .toList();
 
-// flatMap flattens
-List<String> letters = words.stream()
-    .flatMap(word -> Arrays.stream(word.split("")))
-    .collect(Collectors.toList());
-// [h, e, l, l, o, w, o, r, l, d]
+List<String> flattened = words.stream()
+    .flatMap(w -> Arrays.stream(w.split("")))
+    .toList();
+```
 
-// Optional example
+Optional chaining example:
+```java
 Optional<String> city = findPerson(id)
     .flatMap(Person::getAddress)
     .flatMap(Address::getCity);
@@ -116,33 +98,34 @@ Optional<String> city = findPerson(id)
 <a id="q4"></a>
 ### Q4: How do parallel streams work?
 **Answer:**
-Parallel streams use the ForkJoinPool to execute operations concurrently.
+Parallel streams split work across threads (typically `ForkJoinPool.commonPool()`).
 
 ```java
-numbers.parallelStream()
+long count = numbers.parallelStream()
     .filter(n -> n % 2 == 0)
     .count();
-
-// Or convert existing stream
-numbers.stream().parallel().filter(...);
 ```
 
-| Use Parallel | Avoid Parallel |
-|--------------|----------------|
-| Large datasets (10,000+ elements) | Small datasets |
-| CPU-intensive operations | I/O operations |
-| Independent operations | Stateful operations |
-| Splittable data sources (ArrayList) | LinkedList |
+Use parallel streams when:
+- dataset is large
+- operations are CPU-bound and stateless
+- source splits efficiently (`ArrayList`, arrays)
 
-**Pitfalls:**
+Avoid when:
+- tasks are I/O-bound or blocking
+- data is small
+- operations depend on shared mutable state or strict ordering
+
 ```java
-// ❌ DON'T: Shared mutable state
-List<Integer> results = new ArrayList<>();  // NOT thread-safe!
-numbers.parallelStream().forEach(results::add);  // Race condition!
+// Unsafe: race condition
+List<Integer> out = new ArrayList<>();
+numbers.parallelStream().forEach(out::add);
 
-// ✓ DO: Use collectors
-List<Integer> results = numbers.parallelStream().collect(Collectors.toList());
+// Safe
+List<Integer> safe = numbers.parallelStream().toList();
 ```
+
+**Operational caveat:** using common pool in app servers can cause contention with unrelated parallel tasks.
 
 ---
 
@@ -151,93 +134,99 @@ List<Integer> results = numbers.parallelStream().collect(Collectors.toList());
 <a id="q5"></a>
 ### Q5: What are functional interfaces in Java?
 **Answer:**
-A functional interface has exactly one abstract method and can be used as the target for lambda expressions.
+A functional interface has exactly one abstract method (SAM: Single Abstract Method) and is target type for lambdas/method references.
 
 ```java
 @FunctionalInterface
 public interface Calculator {
-    int calculate(int a, int b);  // Single abstract method
-    
-    default int add(int a, int b) { return a + b; }  // Default allowed
-    static int multiply(int a, int b) { return a * b; }  // Static allowed
-}
+    int calculate(int a, int b);
 
-Calculator addition = (a, b) -> a + b;
-int result = addition.calculate(5, 3);  // 8
+    default int add(int a, int b) { return a + b; }
+    static int multiply(int a, int b) { return a * b; }
+}
 ```
+
+Rules:
+- `default` and `static` methods do not break SAM requirement.
+- Methods from `Object` (`toString`, `equals`) are ignored for SAM counting.
+
+**Design tip:** functional interfaces are ideal for behavior injection (callbacks, policies, predicates).
 
 <a id="q6"></a>
 ### Q6: What are the built-in functional interfaces?
 **Answer:**
+Core interfaces:
 
-| Interface | Method | Description |
-|-----------|--------|-------------|
-| `Function<T,R>` | `R apply(T t)` | Transform T to R |
-| `Predicate<T>` | `boolean test(T t)` | Test condition |
-| `Consumer<T>` | `void accept(T t)` | Consume value |
-| `Supplier<T>` | `T get()` | Supply value |
-| `BiFunction<T,U,R>` | `R apply(T t, U u)` | Two inputs, one output |
-| `UnaryOperator<T>` | `T apply(T t)` | Same input/output type |
-| `BinaryOperator<T>` | `T apply(T t1, T t2)` | Two same types to one |
+| Interface | Method | Purpose |
+|-----------|--------|---------|
+| `Function<T,R>` | `R apply(T t)` | transform |
+| `Predicate<T>` | `boolean test(T t)` | condition test |
+| `Consumer<T>` | `void accept(T t)` | side-effect consume |
+| `Supplier<T>` | `T get()` | lazy value supply |
+| `BiFunction<T,U,R>` | `R apply(T t, U u)` | two-input transform |
+| `UnaryOperator<T>` | `T apply(T t)` | same-type transform |
+| `BinaryOperator<T>` | `T apply(T a, T b)` | same-type combine |
+
+Primitive specializations reduce boxing cost:
+- `IntFunction`, `LongSupplier`, `DoublePredicate`, `IntUnaryOperator`, etc.
 
 ```java
-Function<String, Integer> length = String::length;
-Predicate<String> isLong = s -> s.length() > 5;
-Consumer<String> print = System.out::println;
-Supplier<LocalDateTime> now = LocalDateTime::now;
+IntUnaryOperator square = x -> x * x;
+int value = square.applyAsInt(7);
 ```
 
 <a id="q7"></a>
 ### Q7: What are lambda expressions and method references?
 **Answer:**
-
-**Lambda expressions:**
-```java
-(a, b) -> a + b              // Expression body
-x -> x * 2                   // Single parameter
-() -> System.out.println()   // No parameters
-```
-
-**Method references:**
-| Type | Syntax | Lambda Equivalent |
-|------|--------|-------------------|
-| Static method | `Class::staticMethod` | `x -> Class.staticMethod(x)` |
-| Instance method | `object::method` | `x -> object.method(x)` |
-| Arbitrary instance | `Class::method` | `(obj, x) -> obj.method(x)` |
-| Constructor | `Class::new` | `x -> new Class(x)` |
+**Lambda** is an inline anonymous function with target typing from context.
 
 ```java
-Function<String, Integer> parseInt = Integer::parseInt;
-Function<String, String> toUpper = String::toUpperCase;
-Supplier<ArrayList<String>> listSupplier = ArrayList::new;
+BiFunction<Integer, Integer, Integer> add = (a, b) -> a + b;
+Predicate<String> nonEmpty = s -> !s.isBlank();
 ```
+
+**Method references** are shorthand lambdas when you only delegate to an existing method:
+
+| Type | Syntax | Equivalent |
+|------|--------|------------|
+| Static | `Class::staticMethod` | `x -> Class.staticMethod(x)` |
+| Bound instance | `obj::method` | `x -> obj.method(x)` |
+| Unbound instance | `Class::method` | `(obj, x) -> obj.method(x)` |
+| Constructor | `Class::new` | `() -> new Class()` |
+
+```java
+Function<String, Integer> parse = Integer::parseInt;
+Supplier<ArrayList<String>> createList = ArrayList::new;
+```
+
+**Pitfall:** captured local variables must be effectively final.
 
 <a id="q8"></a>
 ### Q8: What is Optional and how should you use it?
 **Answer:**
-`Optional<T>` is a container that may or may not contain a non-null value.
+`Optional<T>` models "value may be absent" explicitly.
 
 ```java
-Optional<String> empty = Optional.empty();
-Optional<String> present = Optional.of("value");      // Throws if null
-Optional<String> nullable = Optional.ofNullable(str); // Allows null
+Optional<String> maybeName = Optional.ofNullable(rawName);
+String name = maybeName.filter(s -> !s.isBlank()).orElse("Unknown");
 ```
 
-**Using Optional correctly:**
+Good usage:
+- return type for methods where absence is expected
+- fluent transformations with `map`, `flatMap`, `filter`
+- fail-fast with `orElseThrow`
+
+Avoid:
+- Optional fields in entities/DTOs
+- Optional parameters
+- `isPresent()` + `get()` imperative style
+
 ```java
-// ✓ DO: Use functional methods
-String name = user.map(User::getName).orElse("Unknown");
-String name = user.map(User::getName).orElseGet(() -> generateDefault());
-String name = user.map(User::getName).orElseThrow(() -> new NotFoundException());
-
-// ✓ DO: Chain operations
-String city = user.flatMap(User::getAddress).flatMap(Address::getCity).orElse("Unknown");
-
-// ❌ DON'T: Use isPresent() + get()
-if (user.isPresent()) { return user.get(); }  // Anti-pattern!
-
-// ❌ DON'T: Use Optional for fields or parameters
+// Better than isPresent/get:
+User user = repo.findById(id).orElseThrow(NotFoundException::new);
 ```
+
+**Performance note:** Optional improves API clarity; do not overuse inside tight loops or primitive-heavy code paths.
 
 ---
 
@@ -246,101 +235,74 @@ if (user.isPresent()) { return user.get(); }  // Anti-pattern!
 <a id="q9"></a>
 ### Q9: What are the key features in Java 8?
 **Answer:**
+Major Java 8 additions that changed everyday coding style:
 
-| Feature | Description |
-|---------|-------------|
-| Lambda expressions | Functional programming support |
-| Stream API | Functional-style operations on collections |
-| Optional | Container for nullable values |
-| Default methods | Interface methods with implementation |
-| Method references | Shorthand for lambdas |
-| New Date/Time API | java.time package |
-| CompletableFuture | Async programming |
+| Feature | Why it matters |
+|---------|----------------|
+| Lambdas + functional interfaces | concise behavior passing |
+| Stream API | declarative collection processing |
+| Optional | explicit nullability handling |
+| Default methods | evolve interfaces safely |
+| New Date/Time API (`java.time`) | immutable, timezone-correct date handling |
+| CompletableFuture | async composition |
 
 ```java
-// Date/Time API
-LocalDate today = LocalDate.now();
-LocalDateTime dateTime = LocalDateTime.of(2024, 1, 15, 10, 30);
-Duration duration = Duration.between(start, end);
-
-// CompletableFuture
-CompletableFuture.supplyAsync(() -> fetchData())
-    .thenApply(data -> process(data))
-    .thenAccept(result -> save(result));
+CompletableFuture.supplyAsync(this::fetchData)
+    .thenApply(this::transform)
+    .thenAccept(this::save);
 ```
+
+**Migration caveat:** Streams and CompletableFuture improve expressiveness but can hide complexity if error handling and thread execution context are not explicit.
 
 <a id="q10"></a>
 ### Q10: What are the key features in Java 11?
 **Answer:**
+Java 11 (LTS) stabilizes many post-Java-8 improvements:
 
 | Feature | Description |
 |---------|-------------|
-| `var` for lambda parameters | Type inference in lambdas |
-| HTTP Client (standard) | New HTTP client API |
-| String methods | isBlank(), lines(), strip(), repeat() |
-| Files methods | readString(), writeString() |
-| Optional.isEmpty() | Check if Optional is empty |
-| Single-file execution | Run .java files directly |
+| Standard `HttpClient` | sync + async HTTP with HTTP/2 support |
+| `var` in lambda params | cleaner lambda declarations with annotations |
+| String APIs | `isBlank`, `lines`, `strip`, `repeat` |
+| File APIs | `Files.readString`, `Files.writeString` |
+| `Optional.isEmpty()` | more readable optional checks |
+| Single-file source execution | `java MyScript.java` |
 
 ```java
-// New String methods
-"  ".isBlank();              // true
-"hello\nworld".lines();      // Stream of lines
-"  hello  ".strip();         // "hello"
-"abc".repeat(3);             // "abcabcabc"
-
-// HTTP Client
 HttpClient client = HttpClient.newHttpClient();
-HttpRequest request = HttpRequest.newBuilder()
-    .uri(URI.create("https://api.example.com/data"))
-    .GET().build();
-HttpResponse<String> response = client.send(request, BodyHandlers.ofString());
+HttpRequest request = HttpRequest.newBuilder(URI.create("https://example.com")).GET().build();
+HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 ```
+
+**Enterprise impact:** Java 11 is a long-term baseline for many production systems due to LTS support and modern runtime improvements.
 
 <a id="q11"></a>
 ### Q11: What are the key features in Java 17?
 **Answer:**
+Java 17 (LTS) introduces stronger modeling and language ergonomics:
 
-| Feature | Description |
-|---------|-------------|
-| Sealed classes | Restrict class hierarchy |
-| Records | Immutable data classes |
-| Pattern matching for instanceof | Enhanced type checking |
-| Switch expressions | Switch as expression |
-| Text blocks | Multi-line strings |
+| Feature | Benefit |
+|---------|---------|
+| Records | concise immutable data carriers |
+| Sealed classes | controlled inheritance |
+| Pattern matching for `instanceof` | less casting boilerplate |
+| Text blocks | cleaner multiline strings |
+| Switch expressions (standardized earlier, widely used in 17-era code) | expression-oriented control flow |
 
 ```java
-// Sealed classes
-public sealed class Shape permits Circle, Rectangle, Triangle { }
-public final class Circle extends Shape { }
+public sealed interface Shape permits Circle, Rectangle {}
+public record Circle(double radius) implements Shape {}
+public record Rectangle(double width, double height) implements Shape {}
 
-// Records
-public record Person(String name, int age) {
-    public Person {
-        if (age < 0) throw new IllegalArgumentException();
-    }
+double area(Shape s) {
+    return switch (s) {
+        case Circle c -> Math.PI * c.radius() * c.radius();
+        case Rectangle r -> r.width() * r.height();
+    };
 }
-
-// Pattern matching for instanceof
-if (obj instanceof String s) {
-    System.out.println(s.length());
-}
-
-// Switch expressions
-int numLetters = switch (day) {
-    case "MONDAY", "FRIDAY" -> 6;
-    case "TUESDAY" -> 7;
-    default -> throw new IllegalStateException();
-};
-
-// Text blocks
-String json = """
-    {
-        "name": "Alice",
-        "age": 30
-    }
-    """;
 ```
+
+**Design takeaway:** records + sealed classes + pattern matching encourage algebraic-style domain modeling with safer, clearer code.
 
 ---
 

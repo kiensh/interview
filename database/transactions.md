@@ -8,13 +8,15 @@
 
 ## Table of Contents
 
-### [Transactions & Isolation Levels](#transactions--isolation-levels)
+### [Transactions & Isolation Foundations](#transactions--isolation-foundations)
 - [Q1: What is a database transaction?](#q1)
 - [Q2: What are Dirty Read, Non-Repeatable Read, and Phantom Read?](#q2)
 - [Q3: What are the database isolation levels?](#q3)
 - [Q4: What is the difference between Read Committed and Read Uncommitted?](#q4)
 - [Q5: What is the difference between Repeatable Read and Serializable?](#q5)
 - [Q6: How do you choose the right isolation level?](#q6)
+
+### [Advanced Concurrency Anomalies](#advanced-concurrency-anomalies)
 - [Q7: What are Lost Update and Write Skew anomalies?](#q7)
 
 ### [Transaction Propagation & Savepoints](#transaction-propagation--savepoints)
@@ -36,107 +38,115 @@
 
 ---
 
-## Transactions & Isolation Levels
+## Transactions & Isolation Foundations
 
 <a id="q1"></a>
 ### Q1: What is a database transaction?
 **Answer:**
-A transaction is a unit of work that is either completely executed or not at all.
+A transaction is a logical unit of work that is committed as one atomic change-set or fully rolled back.
 
-**Properties (ACID):**
-- **Atomicity**: All or nothing
-- **Consistency**: Valid state to valid state
-- **Isolation**: Concurrent transactions don't interfere
-- **Durability**: Committed data persists
+**Why transactions matter in production:**
+- Prevent partial updates across related rows/tables.
+- Keep business invariants valid under concurrency.
+- Provide crash recovery guarantees.
+
+**ACID recap:**
+- **Atomicity:** all statements succeed or none do.
+- **Consistency:** constraints and invariants remain valid.
+- **Isolation:** concurrent transactions do not corrupt each other.
+- **Durability:** committed data survives crashes (via WAL/redo logs).
 
 ```sql
-BEGIN TRANSACTION;
+BEGIN;
 UPDATE accounts SET balance = balance - 100 WHERE id = 1;
 UPDATE accounts SET balance = balance + 100 WHERE id = 2;
-COMMIT; -- or ROLLBACK if error
+COMMIT; -- or ROLLBACK on error
 ```
 
-**Transaction states:**
-```
-Active → Partially Committed → Committed
-   ↓              ↓
-Failed ←──────────┘
-   ↓
-Aborted (Rolled Back)
+**Transaction lifecycle (simplified):**
+```mermaid
+stateDiagram-v2
+    [*] --> active
+    active --> partiallyCommitted: statementsFinished
+    partiallyCommitted --> committed: commitRecordDurable
+    active --> failed: statementError
+    partiallyCommitted --> failed: crashBeforeDurability
+    failed --> aborted: rollbackDone
+    aborted --> [*]
+    committed --> [*]
 ```
 
 <a id="q2"></a>
 ### Q2: What are Dirty Read, Non-Repeatable Read, and Phantom Read?
 **Answer:**
-These are **read phenomena** that can occur when transactions run concurrently:
+These are anomalies caused by overlapping transactions observing changing data.
 
-**1. Dirty Read**
-Reading uncommitted data from another transaction.
+| Anomaly | What happens | Typical level where possible |
+|---------|--------------|-------------------------------|
+| Dirty Read | Read uncommitted value that may roll back | READ UNCOMMITTED |
+| Non-Repeatable Read | Same row read twice returns different committed values | READ COMMITTED |
+| Phantom Read | Re-running predicate query returns new/deleted matching rows | READ COMMITTED / some RR implementations |
 
-```
-Transaction A                    Transaction B
-─────────────                    ─────────────
-                                 UPDATE balance = 500
-SELECT balance → 500 (dirty!)    
-                                 ROLLBACK (balance reverts to 1000)
-Uses 500 (wrong value!)
-```
-
-**2. Non-Repeatable Read**
-Same query returns different values within a transaction.
-
-```
-Transaction A                    Transaction B
-─────────────                    ─────────────
-SELECT balance → 1000
-                                 UPDATE balance = 500
-                                 COMMIT
-SELECT balance → 500 (different!)
+**Dirty Read example:**
+```mermaid
+sequenceDiagram
+    participant txA as TransactionA
+    participant txB as TransactionB
+    txB->>txB: UPDATE balance=500 (not committed)
+    txA->>txB: SELECT balance
+    txB-->>txA: 500
+    txB->>txB: ROLLBACK
+    Note over txA: txA used a value that never committed
 ```
 
-**3. Phantom Read**
-New rows appear in repeated queries.
-
+**Non-Repeatable Read example:**
+```mermaid
+sequenceDiagram
+    participant txA as TransactionA
+    participant txB as TransactionB
+    txA->>txA: SELECT balance -> 1000
+    txB->>txB: UPDATE balance=500
+    txB->>txB: COMMIT
+    txA->>txA: SELECT balance -> 500
 ```
-Transaction A                    Transaction B
-─────────────                    ─────────────
-SELECT COUNT(*) WHERE age > 20 → 5
-                                 INSERT INTO users (age=25)
-                                 COMMIT
-SELECT COUNT(*) WHERE age > 20 → 6 (phantom row!)
-```
 
-| Phenomenon | Problem | Example |
-|------------|---------|---------|
-| Dirty Read | Reading uncommitted data | See rolled-back values |
-| Non-Repeatable Read | Data changes between reads | Balance changed |
-| Phantom Read | New rows appear | COUNT increased |
+**Phantom Read example:**
+```mermaid
+sequenceDiagram
+    participant txA as TransactionA
+    participant txB as TransactionB
+    txA->>txA: SELECT COUNT(*) WHERE age > 20 -> 5
+    txB->>txB: INSERT user(age=25)
+    txB->>txB: COMMIT
+    txA->>txA: SELECT COUNT(*) WHERE age > 20 -> 6
+```
 
 <a id="q3"></a>
 ### Q3: What are the database isolation levels?
 **Answer:**
-Isolation levels control the visibility of changes made by concurrent transactions.
+Isolation level controls what one transaction can observe from others.
 
-| Isolation Level | Dirty Read | Non-Repeatable Read | Phantom Read | Performance |
+| Isolation Level | Dirty Read | Non-Repeatable Read | Phantom Read | Concurrency |
 |-----------------|------------|---------------------|--------------|-------------|
-| READ UNCOMMITTED | ✅ Possible | ✅ Possible | ✅ Possible | Fastest |
-| READ COMMITTED | ❌ Prevented | ✅ Possible | ✅ Possible | Fast |
-| REPEATABLE READ | ❌ Prevented | ❌ Prevented | ✅ Possible | Medium |
-| SERIALIZABLE | ❌ Prevented | ❌ Prevented | ❌ Prevented | Slowest |
+| READ UNCOMMITTED | Possible | Possible | Possible | Highest |
+| READ COMMITTED | Prevented | Possible | Possible | High |
+| REPEATABLE READ | Prevented | Prevented | Engine-dependent | Medium |
+| SERIALIZABLE | Prevented | Prevented | Prevented | Lowest |
 
-**Setting isolation level:**
+**Engine notes that interviewers like:**
+- PostgreSQL maps `READ UNCOMMITTED` to `READ COMMITTED`.
+- InnoDB defaults to `REPEATABLE READ`.
+- PostgreSQL defaults to `READ COMMITTED`.
+- Serializable in PostgreSQL uses SSI (Serializable Snapshot Isolation), not just coarse locking.
+
 ```sql
--- SQL Standard
+-- Standard SQL style
 SET TRANSACTION ISOLATION LEVEL READ COMMITTED;
 
--- MySQL
-SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
-
--- PostgreSQL (default is READ COMMITTED)
+-- PostgreSQL per transaction
 BEGIN TRANSACTION ISOLATION LEVEL SERIALIZABLE;
 ```
 
-**Spring Boot:**
 ```java
 @Transactional(isolation = Isolation.READ_COMMITTED)
 public void transferMoney() { }
@@ -148,44 +158,25 @@ public void transferMoney() { }
 
 | READ UNCOMMITTED | READ COMMITTED |
 |------------------|----------------|
-| Can read uncommitted (dirty) data | Only reads committed data |
-| Fastest, no locks for reads | Slightly slower, uses locks |
-| Risk of seeing rolled-back data | Safe from dirty reads |
-| Rarely used in production | **Default in most databases** |
+| Can read uncommitted data | Reads only committed data |
+| Vulnerable to dirty reads | Prevents dirty reads |
+| Rare in OLTP production | Default for many production systems |
+| Slightly lower read coordination | Safer semantics with small overhead |
 
-**READ UNCOMMITTED example:**
+**Practical implication:**
+- `READ UNCOMMITTED` can return values that are rolled back later.
+- `READ COMMITTED` gives statement-level consistency, but repeated reads can still change.
+
 ```sql
 -- Transaction A
 BEGIN;
-UPDATE products SET price = 100 WHERE id = 1;  -- Not committed yet
-
--- Transaction B (READ UNCOMMITTED)
-SELECT price FROM products WHERE id = 1;  -- Returns 100 (dirty read!)
-
--- Transaction A
-ROLLBACK;  -- Price reverts to original
-
--- Transaction B used wrong price!
-```
-
-**READ COMMITTED example:**
-```sql
--- Transaction A
-BEGIN;
-UPDATE products SET price = 100 WHERE id = 1;  -- Not committed
+UPDATE products SET price = 100 WHERE id = 1; -- uncommitted
 
 -- Transaction B (READ COMMITTED)
-SELECT price FROM products WHERE id = 1;  -- Waits or returns OLD value
-
--- Transaction A
-COMMIT;
-
--- Transaction B now sees 100
+SELECT price FROM products WHERE id = 1; -- sees old committed value or waits
 ```
 
-**Use cases:**
-- **READ UNCOMMITTED**: Approximate counts, reporting (rare)
-- **READ COMMITTED**: Most OLTP applications (PostgreSQL, Oracle default)
+**When to mention RU:** mostly legacy/reporting scenarios where exact correctness is not critical.
 
 <a id="q5"></a>
 ### Q5: What is the difference between Repeatable Read and Serializable?
@@ -193,146 +184,89 @@ COMMIT;
 
 | REPEATABLE READ | SERIALIZABLE |
 |-----------------|--------------|
-| Prevents dirty & non-repeatable reads | Prevents ALL anomalies |
-| Phantom reads possible | Phantom reads prevented |
-| Row-level locking | Range locking or MVCC |
-| **MySQL default** | Highest isolation |
-| Good balance of safety/performance | Slowest, highest contention |
+| Stable row snapshots within transaction | Equivalent to some serial order |
+| Often enough for many OLTP flows | Strongest correctness guarantee |
+| Better throughput | Highest contention/retry risk |
+| Can still allow serialization anomalies (for example write skew) | Prevents write skew and predicate anomalies |
 
-**REPEATABLE READ (phantom read possible):**
-```sql
--- Transaction A
-BEGIN;
-SELECT * FROM orders WHERE amount > 100;  -- Returns 5 rows
+**Example anomaly under weaker isolation (write skew):**
+- Two doctors both read "at least one doctor must stay on call".
+- Each transaction updates a different row to `off_call`.
+- Both commit; invariant is violated.
 
--- Transaction B
-INSERT INTO orders (amount) VALUES (200);
-COMMIT;
-
--- Transaction A
-SELECT * FROM orders WHERE amount > 100;  -- Returns 6 rows (phantom!)
-COMMIT;
-```
-
-**SERIALIZABLE (no phantoms):**
-```sql
--- Transaction A
-BEGIN;
-SELECT * FROM orders WHERE amount > 100;  -- Locks the range
-
--- Transaction B
-INSERT INTO orders (amount) VALUES (200);  -- BLOCKED until A commits
-
--- Transaction A
-SELECT * FROM orders WHERE amount > 100;  -- Still 5 rows
-COMMIT;
-
--- Transaction B now proceeds
-```
-
-**Implementation differences:**
-- **MySQL**: Uses gap locks in REPEATABLE READ (reduces phantoms)
-- **PostgreSQL**: REPEATABLE READ uses snapshot isolation (phantoms possible)
-- **SERIALIZABLE**: True serializability via locking or SSI (Serializable Snapshot Isolation)
+Serializable prevents this class of anomaly by conflict detection or stronger predicate locking.
 
 <a id="q6"></a>
 ### Q6: How do you choose the right isolation level?
 **Answer:**
+Pick the lowest isolation level that still protects your business invariants.
 
-| Use Case | Recommended Level | Reason |
-|----------|-------------------|--------|
-| Financial transactions | SERIALIZABLE | Maximum consistency |
-| E-commerce checkout | REPEATABLE READ | Prevent price changes mid-transaction |
-| General web apps | READ COMMITTED | Good balance |
-| Analytics/Reporting | READ UNCOMMITTED | Approximate data OK |
-| Inventory management | REPEATABLE READ or SERIALIZABLE | Prevent overselling |
+| Use Case | Typical Choice | Why |
+|----------|----------------|-----|
+| Bank transfer / ledger posting | SERIALIZABLE (or strict locking) | No tolerance for anomalies |
+| Checkout / inventory reservation | REPEATABLE READ + explicit locks | Balance correctness and throughput |
+| General CRUD web APIs | READ COMMITTED | Good default for many services |
+| Analytics dashboards | READ COMMITTED / snapshot reads | Throughput over strict point-in-time guarantees |
 
-**Decision factors:**
-1. **Data consistency requirements** - How critical is accuracy?
-2. **Concurrency needs** - How many simultaneous users?
-3. **Performance requirements** - Can you afford locking overhead?
-4. **Conflict likelihood** - How often do transactions touch same data?
+**Decision checklist:**
+1. What invariant must never break?
+2. How often do transactions touch same rows/ranges?
+3. What is acceptable retry rate?
+4. Is optimistic retry logic already in place?
 
-**Best practices:**
-```java
-// Default to READ COMMITTED
-@Transactional(isolation = Isolation.READ_COMMITTED)
-public void normalOperation() { }
+**Good engineering pattern:** keep most requests at `READ COMMITTED`, and isolate only high-risk flows (payment, inventory, seat booking) with stronger control.
 
-// Use SERIALIZABLE for critical operations
-@Transactional(isolation = Isolation.SERIALIZABLE)
-public void financialTransfer() { }
+---
 
-// Consider optimistic locking as alternative
-@Entity
-public class Account {
-    @Version
-    private Long version;  // Optimistic locking
-}
-```
-
-**Alternatives to high isolation:**
-- **Optimistic locking**: Version field, retry on conflict
-- **Pessimistic locking**: `SELECT ... FOR UPDATE`
-- **Application-level checks**: Validate before commit
+## Advanced Concurrency Anomalies
 
 <a id="q7"></a>
 ### Q7: What are Lost Update and Write Skew anomalies?
-
 **Answer:**
 
-**Lost Update**
-Two transactions read the same value, both update it, one overwrites the other.
+**Lost Update:** two writers overwrite each other because both started from the same old value.
 
+```mermaid
+sequenceDiagram
+    participant txA as TransactionA
+    participant txB as TransactionB
+    participant db as Database
+    txA->>db: Read balance 1000
+    txB->>db: Read balance 1000
+    txA->>db: Write balance 1100
+    txB->>db: Write balance 1200
+    txA->>db: Read final balance
+    db-->>txA: 1200 and txA update is lost
 ```
-Transaction A                    Transaction B
-─────────────                    ─────────────
-SELECT balance → 1000            SELECT balance → 1000
-balance = 1000 + 100             balance = 1000 + 200
-UPDATE balance = 1100            UPDATE balance = 1200
-COMMIT                           COMMIT
 
-Result: 1200 (A's update lost!)
-Expected: 1300
+**Write Skew:** transactions update different rows after reading shared predicate state; final combined result violates rule.
+
+```mermaid
+sequenceDiagram
+    participant txA as TransactionA
+    participant txB as TransactionB
+    participant db as Database
+    txA->>db: Read on call doctors count 2
+    txB->>db: Read on call doctors count 2
+    txA->>db: Set doctorA off call
+    txB->>db: Set doctorB off call
+    txA->>db: Commit
+    txB->>db: Commit
+    txA->>db: Read on call doctors count
+    db-->>txA: 0 and invariant is broken
 ```
 
-**Prevention:**
+**Prevention strategies:**
+- `SELECT ... FOR UPDATE` on critical rows/ranges.
+- Optimistic version checks (`WHERE version = ?`) + retry.
+- SERIALIZABLE for invariant-critical workflows.
+
 ```sql
--- Use SELECT FOR UPDATE
-SELECT balance FROM accounts WHERE id = 1 FOR UPDATE;
-
--- Or use optimistic locking
-UPDATE accounts SET balance = 1100, version = 2 
-WHERE id = 1 AND version = 1;
+-- Optimistic lock pattern
+UPDATE accounts
+SET balance = :newBalance, version = version + 1
+WHERE id = :id AND version = :oldVersion;
 ```
-
-**Write Skew**
-Two transactions read overlapping data, make decisions based on it, but the combined result violates a constraint.
-
-```
--- Constraint: At least one doctor must be on call
--- Currently: Doctor A and Doctor B are on call
-
-Transaction A                    Transaction B
-─────────────                    ─────────────
-SELECT COUNT(*) on_call → 2      SELECT COUNT(*) on_call → 2
-"2 doctors, I can leave"         "2 doctors, I can leave"
-UPDATE set on_call=false         UPDATE set on_call=false
-  WHERE doctor='A'                 WHERE doctor='B'
-COMMIT                           COMMIT
-
-Result: 0 doctors on call! (constraint violated)
-```
-
-**Prevention:**
-- SERIALIZABLE isolation level
-- Explicit locking: `SELECT ... FOR UPDATE`
-- Materialized constraints in database
-
-| Anomaly | Description | Prevention |
-|---------|-------------|------------|
-| Lost Update | Concurrent updates, one lost | FOR UPDATE, optimistic locking |
-| Write Skew | Valid reads, invalid combined writes | SERIALIZABLE, explicit locks |
 
 ---
 
@@ -341,59 +275,40 @@ Result: 0 doctors on call! (constraint violated)
 <a id="q8"></a>
 ### Q8: What is transaction propagation?
 **Answer:**
-Transaction propagation defines how a transactional method behaves when called from another transactional method.
+Propagation controls how a transactional method behaves when called inside another transactional context (especially in Spring).
 
 | Propagation | Behavior |
 |-------------|----------|
-| **REQUIRED** (default) | Join existing or create new |
-| **REQUIRES_NEW** | Always create new, suspend existing |
-| **SUPPORTS** | Join if exists, non-transactional otherwise |
-| **NOT_SUPPORTED** | Non-transactional, suspend existing |
-| **MANDATORY** | Must join existing, error if none |
-| **NEVER** | Non-transactional, error if exists |
-| **NESTED** | Nested transaction (savepoint) |
+| REQUIRED | Join existing transaction or create new |
+| REQUIRES_NEW | Always create a new transaction, suspending current one |
+| SUPPORTS | Join if exists, run non-transactionally otherwise |
+| NOT_SUPPORTED | Suspend existing transaction, run without one |
+| MANDATORY | Must run inside an existing transaction |
+| NEVER | Must run without transaction |
+| NESTED | Create savepoint-style nested boundary |
 
 ```java
-@Service
-public class OrderService {
-    
-    @Transactional  // REQUIRED by default
-    public void createOrder(Order order) {
-        orderRepository.save(order);
-        paymentService.processPayment(order);  // What happens here?
-    }
+@Transactional // REQUIRED by default
+public void createOrder(Order order) {
+    orderRepository.save(order);
+    paymentService.charge(order); // joins same transaction by default
 }
 
-@Service
-public class PaymentService {
-    
-    @Transactional(propagation = Propagation.REQUIRED)
-    public void processPayment(Order order) {
-        // Joins the existing transaction from createOrder
-    }
-    
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void processPaymentNew(Order order) {
-        // Creates NEW transaction, suspends createOrder's transaction
-        // If this fails, createOrder still commits
-    }
-    
-    @Transactional(propagation = Propagation.MANDATORY)
-    public void processPaymentMandatory(Order order) {
-        // Must be called from within a transaction
-        // Throws exception if no active transaction
-    }
+@Transactional(propagation = Propagation.REQUIRES_NEW)
+public void writeAuditLog(AuditEntry entry) {
+    auditRepository.save(entry); // commits independently
 }
 ```
+
+**Interview nuance:** propagation settings only apply when call goes through Spring proxy (self-invocation caveat).
 
 <a id="q9"></a>
 ### Q9: What are savepoints in transactions?
 **Answer:**
-Savepoints allow partial rollback within a transaction, rolling back to a specific point without aborting the entire transaction.
+Savepoints allow partial rollback inside a single transaction.
 
 ```sql
 BEGIN;
-
 INSERT INTO orders (id, customer_id) VALUES (1, 100);
 
 SAVEPOINT before_items;
@@ -401,46 +316,17 @@ SAVEPOINT before_items;
 INSERT INTO order_items (order_id, product_id) VALUES (1, 'PROD1');
 INSERT INTO order_items (order_id, product_id) VALUES (1, 'PROD2');
 
--- Something went wrong with items
+-- If item insert fails:
 ROLLBACK TO SAVEPOINT before_items;
--- Order is still saved, items are rolled back
 
 INSERT INTO order_items (order_id, product_id) VALUES (1, 'PROD3');
-
-COMMIT;  -- Commits order and PROD3 only
-```
-
-**Spring/JDBC:**
-```java
-@Transactional
-public void processWithSavepoint() {
-    Connection conn = dataSource.getConnection();
-    
-    try {
-        // First operation
-        jdbcTemplate.update("INSERT INTO orders ...");
-        
-        Savepoint savepoint = conn.setSavepoint("beforeItems");
-        
-        try {
-            // Risky operation
-            jdbcTemplate.update("INSERT INTO order_items ...");
-        } catch (Exception e) {
-            conn.rollback(savepoint);
-            // Continue with alternative logic
-        }
-        
-        // This will commit even if items failed
-    } finally {
-        conn.releaseSavepoint(savepoint);
-    }
-}
+COMMIT;
 ```
 
 **Use cases:**
-- Batch processing with partial failure handling
-- Complex operations where some steps can fail
-- Nested transaction-like behavior
+- Batch processing where some records may fail.
+- Multi-step flows where core entity should persist even if optional steps fail.
+- Emulating nested transaction behavior where DB/framework supports it.
 
 ---
 
@@ -449,108 +335,76 @@ public void processWithSavepoint() {
 <a id="q10"></a>
 ### Q10: What is the two-phase commit protocol?
 **Answer:**
-Two-phase commit (2PC) is a distributed algorithm ensuring all nodes in a distributed transaction either commit or abort together.
+Two-phase commit (2PC) is a coordination protocol to make all participants either commit or abort together.
 
-**Phase 1: Prepare (Voting)**
-1. Coordinator sends PREPARE to all participants
-2. Participants prepare (acquire locks, write to log)
-3. Participants respond VOTE_COMMIT or VOTE_ABORT
+**Phase 1 (Prepare/Vote):**
+1. Coordinator sends `PREPARE`.
+2. Participants persist intent and reply `VOTE_COMMIT` or `VOTE_ABORT`.
 
-**Phase 2: Commit/Abort**
-1. If all voted COMMIT → Coordinator sends COMMIT to all
-2. If any voted ABORT → Coordinator sends ABORT to all
-3. Participants execute and acknowledge
+**Phase 2 (Decision):**
+1. If all vote commit -> coordinator sends `COMMIT`.
+2. Otherwise -> coordinator sends `ABORT`.
 
+```mermaid
+sequenceDiagram
+    participant coord as Coordinator
+    participant n1 as Node1
+    participant n2 as Node2
+    participant n3 as Node3
+
+    coord->>n1: PREPARE
+    coord->>n2: PREPARE
+    coord->>n3: PREPARE
+    n1-->>coord: VOTE_COMMIT
+    n2-->>coord: VOTE_COMMIT
+    n3-->>coord: VOTE_COMMIT
+    coord->>n1: COMMIT
+    coord->>n2: COMMIT
+    coord->>n3: COMMIT
 ```
-        Coordinator
-            │
-     ┌──────┼──────┐
-     ▼      ▼      ▼
-   Node1  Node2  Node3
 
-Phase 1 (Prepare):
-Coordinator → "PREPARE" → All Nodes
-All Nodes → "READY" → Coordinator
+**Drawbacks interviewers expect:**
+- Blocking if coordinator crashes.
+- Long lock holding and higher latency.
+- Sensitive to partitions and partial failures.
 
-Phase 2 (Commit):
-Coordinator → "COMMIT" → All Nodes
-All Nodes → "ACK" → Coordinator
-```
-
-**Problems with 2PC:**
-| Problem | Description |
-|---------|-------------|
-| Blocking | Participants block waiting for coordinator |
-| Single point of failure | Coordinator failure blocks everyone |
-| Network partitions | Uncertain state during partitions |
-| Performance | Multiple round trips, lock holding |
-
-**Alternatives:**
-- **3PC (Three-Phase Commit)**: Adds pre-commit phase
-- **Saga Pattern**: Compensating transactions
-- **TCC (Try-Confirm-Cancel)**: Reservation pattern
+So modern microservices often prefer saga/outbox over strict distributed ACID.
 
 <a id="q11"></a>
 ### Q11: What are distributed transactions and their challenges?
 **Answer:**
-Distributed transactions span multiple databases, services, or systems that must all commit or rollback together.
+Distributed transactions span multiple services/datastores that must reach a consistent business outcome.
 
-**Challenges:**
+**Main challenges:**
+- Network and partial failures.
+- Different data models/transaction semantics.
+- Long-running flows and compensation complexity.
+- Observability/debugging across boundaries.
 
-| Challenge | Description |
-|-----------|-------------|
-| Network failures | Nodes may become unreachable |
-| Partial failures | Some nodes succeed, others fail |
-| Latency | Multiple round trips increase time |
-| Coordination overhead | Lock holding across network |
-| CAP theorem trade-offs | Can't have consistency + availability + partition tolerance |
+**Common patterns:**
+1. **Saga** (choreography/orchestration with compensating actions)
+2. **Outbox** (reliable event publication with local transaction)
+3. **TCC** (Try-Confirm-Cancel reservation flow)
 
-**Patterns for distributed transactions:**
-
-**1. Saga Pattern:**
-```
-Order Saga:
-1. Create Order → (compensate: Cancel Order)
-2. Reserve Inventory → (compensate: Release Inventory)
-3. Process Payment → (compensate: Refund Payment)
-4. Ship Order → (compensate: Cancel Shipment)
-
-If step 3 fails:
-- Execute compensations in reverse: Release Inventory, Cancel Order
+**Saga example:**
+```mermaid
+flowchart TD
+    createOrder[Create Order] --> reserveInv[Reserve Inventory]
+    reserveInv --> processPayment[Process Payment]
+    processPayment --> shipOrder[Ship Order]
+    processPayment -->|paymentFailed| releaseInv[Compensate: Release Inventory]
+    releaseInv --> cancelOrder[Compensate: Cancel Order]
 ```
 
-**2. Outbox Pattern:**
+**Outbox pattern core idea:**
 ```sql
--- Write business data and event in same transaction
 BEGIN;
 INSERT INTO orders (id, status) VALUES (1, 'CREATED');
 INSERT INTO outbox (event_type, payload) VALUES ('OrderCreated', '{"id":1}');
 COMMIT;
-
--- Separate process polls outbox and publishes events
 ```
 
-**3. TCC Pattern:**
-```java
-// Try: Reserve resources
-paymentService.tryReserve(amount);
-inventoryService.tryReserve(items);
-
-// Confirm: Complete the operation
-paymentService.confirm();
-inventoryService.confirm();
-
-// Cancel: If any try fails
-paymentService.cancel();
-inventoryService.cancel();
-```
-
-**Best practices:**
-1. Prefer eventual consistency when possible
-2. Design idempotent operations
-3. Implement compensating transactions
-4. Use correlation IDs for tracing
-5. Consider event-driven architecture
+Publisher service later reads outbox rows and publishes to Kafka/RabbitMQ with retry and idempotency.
 
 ---
 
@@ -559,30 +413,29 @@ inventoryService.cancel();
 <a id="q12"></a>
 ### Q12: What is database locking?
 **Answer:**
-Locking is a mechanism to control concurrent access to data, ensuring data integrity when multiple transactions access the same data.
+Locking coordinates concurrent access so writes do not violate consistency.
 
-**Why locking is needed:**
-- Prevent lost updates
-- Ensure data consistency
-- Implement isolation levels
-- Coordinate concurrent transactions
+**Why locks exist:**
+- Prevent lost updates.
+- Enforce isolation semantics.
+- Protect read-modify-write critical sections.
 
-**Lock granularity:**
-| Level | Locks | Concurrency | Overhead |
-|-------|-------|-------------|----------|
-| Database | Entire database | Lowest | Lowest |
-| Table | Entire table | Low | Low |
-| Page | Data page (group of rows) | Medium | Medium |
-| Row | Single row | Highest | Highest |
+| Granularity | Concurrency | Overhead | Typical use |
+|-------------|-------------|----------|-------------|
+| Database | Lowest | Lowest | Maintenance operations |
+| Table | Low | Low | Bulk changes, migrations |
+| Page | Medium | Medium | Engine-level internal strategy |
+| Row | Highest | Highest | OLTP transactions |
 
 ```sql
--- Explicit row-level locking
-SELECT * FROM accounts WHERE id = 1 FOR UPDATE;  -- Exclusive lock
-SELECT * FROM accounts WHERE id = 1 FOR SHARE;   -- Shared lock
+-- Row-level lock for update
+SELECT * FROM accounts WHERE id = 1 FOR UPDATE;
 
--- Table-level lock
-LOCK TABLE accounts IN EXCLUSIVE MODE;
+-- Shared lock (engine-specific behavior)
+SELECT * FROM accounts WHERE id = 1 FOR SHARE;
 ```
+
+**Interview depth point:** MVCC reduces reader-writer blocking, but writes still need lock/conflict coordination.
 
 <a id="q13"></a>
 ### Q13: What is the difference between optimistic and pessimistic locking?
@@ -590,86 +443,52 @@ LOCK TABLE accounts IN EXCLUSIVE MODE;
 
 | Optimistic Locking | Pessimistic Locking |
 |--------------------|---------------------|
-| Assumes conflicts are rare | Assumes conflicts are common |
-| No locks during read/modify | Locks data during entire operation |
-| Checks for conflicts at commit | Prevents conflicts proactively |
-| Uses version/timestamp column | Uses database locks |
-| Better for read-heavy workloads | Better for write-heavy workloads |
-| May fail at commit time | Guaranteed success (if lock acquired) |
+| Assumes conflicts are rare | Assumes conflicts are likely |
+| No lock while reading | Acquire lock before update |
+| Detects conflict at write/commit | Prevents concurrent conflicting writes |
+| Requires retry on conflict | Can block/wait and increase contention |
+| Great for read-heavy workloads | Better for high-contention critical paths |
 
-**Optimistic Locking (Version-based):**
+**Optimistic example (`@Version`):**
 ```java
 @Entity
 public class Account {
     @Id
     private Long id;
-    
-    @Version  // Hibernate auto-increments on update
+
+    @Version
     private Long version;
-    
-    private BigDecimal balance;
 }
-
-// Usage
-Account account = repository.findById(1L);  // version = 5
-account.setBalance(new BigDecimal("100"));
-repository.save(account);  // UPDATE ... WHERE id = 1 AND version = 5
-// If another transaction updated, version won't match → OptimisticLockException
 ```
 
-**Pessimistic Locking:**
-```java
-// JPA pessimistic lock
-@Lock(LockModeType.PESSIMISTIC_WRITE)
-@Query("SELECT a FROM Account a WHERE a.id = :id")
-Account findByIdWithLock(@Param("id") Long id);
-
-// Or native SQL
-@Query(value = "SELECT * FROM accounts WHERE id = :id FOR UPDATE", nativeQuery = true)
-Account findByIdForUpdate(@Param("id") Long id);
-```
-
+**Pessimistic example:**
 ```sql
--- SQL pessimistic locking
 BEGIN;
-SELECT * FROM accounts WHERE id = 1 FOR UPDATE;  -- Lock acquired
--- Other transactions block here
+SELECT * FROM accounts WHERE id = 1 FOR UPDATE;
 UPDATE accounts SET balance = balance - 100 WHERE id = 1;
-COMMIT;  -- Lock released
+COMMIT;
 ```
 
 <a id="q14"></a>
 ### Q14: When should you use optimistic vs pessimistic locking?
 **Answer:**
 
-**Use Optimistic Locking when:**
-- Read-heavy workload (many reads, few writes)
-- Low contention (conflicts are rare)
-- Short transactions
-- Can handle retry logic
-- Need high concurrency
+| Scenario | Better choice | Why |
+|----------|---------------|-----|
+| User profile updates | Optimistic | Low conflict, high read concurrency |
+| Product catalog edits | Optimistic | Occasional collisions; retries acceptable |
+| Inventory decrement for flash sale | Pessimistic | High contention, must avoid oversell |
+| Bank transfer ledger rows | Pessimistic or SERIALIZABLE | Correctness over throughput |
+| Seat reservation | Pessimistic | Race conditions are expensive |
 
-**Use Pessimistic Locking when:**
-- Write-heavy workload
-- High contention on same data
-- Conflicts are expensive to resolve
-- Operations must succeed without retry
-- Critical data integrity (financial transactions)
+**Practical rule:**
+- Start optimistic for normal CRUD.
+- Switch selective paths to pessimistic where conflict rate or inconsistency cost is high.
 
-| Scenario | Recommended |
-|----------|-------------|
-| E-commerce product catalog | Optimistic |
-| Inventory with limited stock | Pessimistic |
-| User profile updates | Optimistic |
-| Bank account transfers | Pessimistic |
-| Blog post editing | Optimistic |
-| Seat reservation | Pessimistic |
-
-**Handling optimistic lock failures:**
 ```java
 @Retryable(value = OptimisticLockingFailureException.class, maxAttempts = 3)
 @Transactional
-public void updateBalance(Long id, BigDecimal amount) {
+public void credit(Long id, BigDecimal amount) {
     Account account = repository.findById(id).orElseThrow();
     account.setBalance(account.getBalance().add(amount));
     repository.save(account);
@@ -680,34 +499,35 @@ public void updateBalance(Long id, BigDecimal amount) {
 ### Q15: What are the different lock types in databases?
 **Answer:**
 
-| Lock Type | Description | Compatibility |
-|-----------|-------------|---------------|
-| **Shared (S)** | Read lock, multiple transactions can hold | Compatible with other Shared |
-| **Exclusive (X)** | Write lock, only one transaction | Incompatible with all |
-| **Update (U)** | Intent to update, prevents deadlock | Compatible with Shared |
-| **Intent Shared (IS)** | Intent to acquire Shared at lower level | Compatible with IS, IX, S |
-| **Intent Exclusive (IX)** | Intent to acquire Exclusive at lower level | Compatible with IS, IX |
+| Lock Type | Description | Compatible With |
+|-----------|-------------|-----------------|
+| Shared (S) | Read lock | Other Shared/Intent Shared |
+| Exclusive (X) | Write lock | None |
+| Update (U) | Intent to upgrade S -> X | Shared (engine-dependent) |
+| Intent Shared (IS) | Plans shared lock at lower level | IS, IX, S |
+| Intent Exclusive (IX) | Plans exclusive lock at lower level | IS, IX |
 
-**Lock compatibility matrix:**
-```
-        S    X    IS   IX
-   S   ✓    ✗    ✓    ✗
-   X   ✗    ✗    ✗    ✗
-  IS   ✓    ✗    ✓    ✓
-  IX   ✗    ✗    ✓    ✓
-```
+**Compatibility snapshot (simplified):**
 
-**PostgreSQL lock modes:**
+| Requested \\ Held | S | X | IS | IX |
+|-------------------|---|---|----|----|
+| S | Yes | No | Yes | No |
+| X | No | No | No | No |
+| IS | Yes | No | Yes | Yes |
+| IX | No | No | Yes | Yes |
+
+**PostgreSQL row lock examples:**
 ```sql
--- Different lock modes
-SELECT * FROM accounts FOR SHARE;           -- Shared lock
-SELECT * FROM accounts FOR UPDATE;          -- Exclusive lock
-SELECT * FROM accounts FOR NO KEY UPDATE;   -- Weaker exclusive
-SELECT * FROM accounts FOR KEY SHARE;       -- Weaker shared
+SELECT * FROM accounts FOR SHARE;
+SELECT * FROM accounts FOR UPDATE;
+SELECT * FROM accounts FOR NO KEY UPDATE;
+SELECT * FROM accounts FOR KEY SHARE;
 
--- Skip locked rows (useful for job queues)
-SELECT * FROM jobs WHERE status = 'pending' 
-FOR UPDATE SKIP LOCKED LIMIT 1;
+-- Useful for worker queues
+SELECT * FROM jobs
+WHERE status = 'pending'
+FOR UPDATE SKIP LOCKED
+LIMIT 1;
 ```
 
 ---
@@ -717,24 +537,26 @@ FOR UPDATE SKIP LOCKED LIMIT 1;
 <a id="q16"></a>
 ### Q16: What is a database deadlock and how can you prevent it?
 **Answer:**
-Deadlock: Two transactions each waiting for resources held by the other.
+A deadlock happens when transactions wait on each other in a cycle, and none can proceed.
 
+```mermaid
+flowchart LR
+    txA[Transaction A locks Row 1] --> waitA[Transaction A waits for Row 2]
+    txB[Transaction B locks Row 2] --> waitB[Transaction B waits for Row 1]
+    waitA --> waitB
+    waitB --> waitA
 ```
-Transaction A: Locks Row 1, waits for Row 2
-Transaction B: Locks Row 2, waits for Row 1
-→ Deadlock!
-```
 
-**Prevention:**
-1. Always access tables/rows in same order
-2. Keep transactions short
-3. Use appropriate isolation level
-4. Implement retry logic
-5. Use `SELECT ... FOR UPDATE` carefully
+Databases detect deadlocks and abort one transaction (deadlock victim) so the other can continue.
 
-**Detection:**
-- Most databases detect and kill one transaction
-- Configure deadlock timeout
+**Prevention strategies:**
+1. Access rows/tables in a consistent global order.
+2. Keep transactions short and focused.
+3. Lock only what you need, as late as possible.
+4. Add retry logic for deadlock/serialization failures.
+5. Use appropriate indexes so locks touch fewer rows.
+
+**Operational best practice:** instrument deadlock logs and alert on spikes; frequent deadlocks usually indicate access-order or index design issues.
 
 ---
 

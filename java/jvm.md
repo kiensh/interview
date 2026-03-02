@@ -52,149 +52,86 @@
 <a id="q1"></a>
 ### Q1: What is JVM and how is it different from JDK and JRE?
 **Answer:**
+**JVM (Java Virtual Machine)** is the runtime engine that executes Java bytecode.  
+**JRE (Java Runtime Environment)** bundles JVM + standard libraries to run apps.  
+**JDK (Java Development Kit)** bundles JRE + developer tools (`javac`, `jdb`, `jar`, etc.) to build and run apps.
 
-**JVM (Java Virtual Machine):**
-- A specification that describes how JVM should work
-- An abstract computing machine that enables Java bytecode execution
-- Provides runtime environment for Java applications
-- NOT platform independent (different implementations for different OS)
-
-**JRE (Java Runtime Environment):**
-- Implementation of JVM + core libraries
-- Used to RUN Java applications
-- Contains: JVM + Java class libraries + supporting files
-
-**JDK (Java Development Kit):**
-- JRE + development tools
-- Used to DEVELOP and run Java applications
-- Contains: JRE + compiler (javac) + debugger + other dev tools
-
-```
-┌─────────────────────────────────────────────┐
-│                    JDK                      │
-│  ┌───────────────────────────────────────┐  │
-│  │                 JRE                   │  │
-│  │  ┌─────────────────────────────────┐  │  │
-│  │  │              JVM                │  │  │
-│  │  └─────────────────────────────────┘  │  │
-│  │  + Class Libraries (rt.jar)           │  │
-│  └───────────────────────────────────────┘  │
-│  + javac, javadoc, jar, jdb, etc.           │
-└─────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  jdkNode[JDK]
+  jreNode[JRE]
+  jvmNode[JVM]
+  toolsNode["DevTools: javac, jar, jdb"]
+  libsNode["Runtime libraries"]
+  jdkNode --> jreNode
+  jdkNode --> toolsNode
+  jreNode --> jvmNode
+  jreNode --> libsNode
 ```
 
-**JVM Implementations:**
-- HotSpot VM (Oracle, most common)
-- OpenJ9 (IBM/Eclipse)
-- GraalVM (Oracle, polyglot)
-- Azul Zing (commercial, low latency)
+**Interview caveat:** JVM is a specification with multiple implementations (HotSpot, OpenJ9, GraalVM).
 
 <a id="q2"></a>
 ### Q2: Is JVM platform independent?
 **Answer:**
-**No, JVM is platform dependent.** 
+**JVM implementation is platform dependent**, but **Java bytecode is platform independent**.
 
-When you install JRE on Windows, it deploys JVM code for Windows. When installed on Linux, it deploys JVM code for Linux.
+- You compile once to `.class` bytecode.
+- Different OS-specific JVM implementations execute that same bytecode.
 
-However, **Java bytecode is platform independent** - the same `.class` file can run on any JVM regardless of OS.
-
-```
-                    ┌─────────────────┐
-                    │  HelloWorld.java │
-                    └────────┬────────┘
-                             │ javac (compile)
-                             ▼
-                    ┌─────────────────┐
-                    │ HelloWorld.class │ ← Platform Independent
-                    │   (bytecode)     │
-                    └────────┬────────┘
-           ┌─────────────────┼─────────────────┐
-           ▼                 ▼                 ▼
-    ┌────────────┐   ┌────────────┐   ┌────────────┐
-    │ JVM Windows│   │ JVM Linux  │   │ JVM macOS  │
-    └────────────┘   └────────────┘   └────────────┘
-           │                 │                 │
-           ▼                 ▼                 ▼
-      Windows OS         Linux OS         macOS
+```mermaid
+flowchart LR
+  srcCode["HelloWorld.java"] -->|javac| byteCode["HelloWorld.class (bytecode)"]
+  byteCode --> jvmWin["JVM on Windows"]
+  byteCode --> jvmLinux["JVM on Linux"]
+  byteCode --> jvmMac["JVM on macOS"]
 ```
 
-This is why Java's motto is **"Write Once, Run Anywhere" (WORA)**.
+This is the practical meaning of WORA: Write Once, Run Anywhere (with a compatible JVM).
 
 <a id="q3"></a>
 ### Q3: What are the main components of JVM Architecture?
 **Answer:**
-JVM consists of 3 main components:
+Core components:
+1. **Class Loader Subsystem**
+2. **Runtime Data Areas (Memory)**
+3. **Execution Engine** (Interpreter + JIT + GC)
+4. **JNI + Native Libraries**
 
-```
-┌──────────────────────────────────────────────────────────┐
-│                         JVM                              │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │               1. CLASS LOADER                      │  │
-│  │  Loading → Linking → Initialization                │  │
-│  └────────────────────────────────────────────────────┘  │
-│                          ↓                               │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │          2. RUNTIME DATA AREAS (Memory)            │  │
-│  │  ┌─────────┐ ┌──────┐ ┌───────┐ ┌────┐ ┌────────┐  │  │
-│  │  │ Method  │ │ Heap │ │ Stack │ │ PC │ │ Native │  │  │
-│  │  │  Area   │ │      │ │       │ │Reg │ │ Stack  │  │  │
-│  │  └─────────┘ └──────┘ └───────┘ └────┘ └────────┘  │  │
-│  └────────────────────────────────────────────────────┘  │
-│                          ↓                               │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │            3. EXECUTION ENGINE                     │  │
-│  │  Interpreter + JIT Compiler + Garbage Collector    │  │
-│  └────────────────────────────────────────────────────┘  │
-│                                                          │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │        Native Method Interface (JNI)               │  │
-│  └────────────────────────────────────────────────────┘  │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │           Native Method Libraries                  │  │
-│  └────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  classLoader[ClassLoaderSubsystem] --> runtimeAreas[RuntimeDataAreas]
+  runtimeAreas --> execEngine[ExecutionEngine]
+  execEngine --> jniNode[JNI]
+  jniNode --> nativeLibs[NativeLibraries]
 ```
 
-| Component | Responsibility |
-|-----------|----------------|
-| **ClassLoader** | Load, link, and initialize class files |
-| **Runtime Data Areas** | Memory management during execution |
-| **Execution Engine** | Execute bytecode (interpret/compile to native) |
-| **JNI** | Interface to native libraries (C/C++) |
+| Component | Role |
+|-----------|------|
+| ClassLoader | Loads and links classes on demand |
+| Runtime Data Areas | Holds class metadata, objects, stacks, etc. |
+| Execution Engine | Runs bytecode and optimizes hot code |
+| JNI/Native libs | Bridges Java with native code |
 
 <a id="q4"></a>
 ### Q4: How are JVM instances created and destroyed?
 **Answer:**
+Creation:
+- Running `java MainClass` starts a new OS process with one JVM instance.
+- Each Java process gets its own JVM and heap.
 
-**Creation:**
-- When you run `java ClassName`, a new JVM instance is created
-- Each Java application runs in its own JVM instance
-- 3 different programs = 3 different JVM instances
-- If no Java applications are running, there are no JVM instances
-
-```bash
-java HelloWorld  # Creates JVM instance 1
-java MyApp       # Creates JVM instance 2 (separate)
-```
-
-**Destruction:**
-JVM instance is destroyed when:
-
-1. **All non-daemon threads complete** - JVM exits when all user threads finish (daemon threads are automatically terminated)
-2. **System.exit() is called** - Explicit termination
-3. **Runtime.halt() is called** - Forceful termination (no shutdown hooks)
-4. **Fatal error occurs** - Native error, OutOfMemoryError
+Destruction:
+1. All non-daemon threads finish, or
+2. `System.exit(...)` is called, or
+3. Fatal error/forced termination occurs.
 
 ```java
-// Daemon vs Non-daemon threads
-Thread daemon = new Thread(() -> { /* ... */ });
-daemon.setDaemon(true);  // JVM won't wait for this thread
-daemon.start();
-
-// JVM waits for this thread to complete
-Thread userThread = new Thread(() -> { /* ... */ });
-userThread.start();
+Thread daemon = new Thread(() -> runBackground());
+daemon.setDaemon(true);
+daemon.start(); // JVM does not wait for daemon-only completion
 ```
+
+**Operational note:** zombie non-daemon threads are a common reason for "app does not shut down."
 
 ---
 
@@ -203,167 +140,86 @@ userThread.start();
 <a id="q5"></a>
 ### Q5: What is ClassLoader and how does it work?
 **Answer:**
-ClassLoader is responsible for loading Java classes into JVM memory at runtime.
+ClassLoader loads class bytecode into the JVM and defines `Class<?>` objects lazily at runtime.
 
-**Key responsibilities:**
-1. Find the `.class` file using fully qualified class name (FQCN)
-2. Load the bytecode into memory
-3. Create a `Class` object representing the loaded class
-
-**Important behaviors:**
-- First class loaded is the one containing `main()` method
-- Classes are loaded **on demand** (lazy loading)
-- Each class is loaded only **once** per ClassLoader
-- If class not found: `ClassNotFoundException` or `NoClassDefFoundError`
+Responsibilities:
+- Locate class bytes by fully qualified name.
+- Verify/link class metadata.
+- Define class in a specific class loader namespace.
 
 ```java
-// Get ClassLoader of a class
 ClassLoader loader = MyClass.class.getClassLoader();
-
-// Load class dynamically
-Class<?> clazz = Class.forName("com.example.MyClass");
-
-// Different ClassLoaders
-String.class.getClassLoader();  // null (Bootstrap)
-MyClass.class.getClassLoader(); // AppClassLoader
+Class<?> c = Class.forName("com.example.MyClass");
 ```
+
+**Failure modes:**
+- `ClassNotFoundException`: class cannot be found by lookup path.
+- `NoClassDefFoundError`: class existed at compile time but unavailable at runtime.
 
 <a id="q6"></a>
 ### Q6: What are the types of ClassLoaders in JVM?
 **Answer:**
+Modern JVM hierarchy:
 
-```
-┌─────────────────────────────────────────┐
-│     Bootstrap ClassLoader (Native)      │  ← Loads core Java classes
-│     ($JAVA_HOME/jre/lib/rt.jar)         │     java.lang, java.util, etc.
-└─────────────────────┬───────────────────┘
-                      │ parent
-┌─────────────────────▼───────────────────┐
-│   Extension/Platform ClassLoader        │  ← Loads extension classes
-│   ($JAVA_HOME/jre/lib/ext)              │     javax.*, security providers
-└─────────────────────┬───────────────────┘
-                      │ parent
-┌─────────────────────▼───────────────────┐
-│   Application/System ClassLoader        │  ← Loads application classes
-│   (classpath, -cp)                      │     Your code, dependencies
-└─────────────────────┬───────────────────┘
-                      │ parent
-┌─────────────────────▼───────────────────┐
-│      Custom ClassLoaders (optional)     │  ← Plugin systems, app servers
-└─────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  bootstrap[BootstrapClassLoader]
+  platform[PlatformClassLoader]
+  appLoader[ApplicationClassLoader]
+  customLoader[CustomClassLoader]
+  bootstrap --> platform
+  platform --> appLoader
+  appLoader --> customLoader
 ```
 
-| ClassLoader | Location | Loads |
-|-------------|----------|-------|
-| **Bootstrap** | `$JAVA_HOME/jre/lib` | Core Java API (rt.jar) |
-| **Extension** | `$JAVA_HOME/jre/lib/ext` | Extension libraries |
-| **Application** | Classpath (`-cp`) | Application classes |
-| **Custom** | Defined by developer | Dynamic loading, plugins |
+| Loader | Typical content |
+|--------|------------------|
+| Bootstrap | Core Java classes (`java.lang.*`, etc.) |
+| Platform | Platform modules/libraries |
+| Application | App classpath/module path |
+| Custom | Plugin/module containers, app servers |
+
+**Namespace detail:** the same class name loaded by two different class loaders is treated as different types.
 
 <a id="q7"></a>
 ### Q7: What are the ClassLoader principles (Delegation, Visibility, Uniqueness)?
 **Answer:**
+| Principle | Meaning |
+|-----------|---------|
+| Delegation | Child asks parent first before loading itself |
+| Visibility | Child can see parent-loaded classes, not vice versa |
+| Uniqueness | A class is uniquely identified by `(className, classLoader)` |
 
-**1. Delegation Principle (Parent-First)**
-```
-Request to load com.example.MyClass
-          │
-          ▼
-    App ClassLoader ──────► "Can parent load it?"
-          │                        │
-          │                        ▼
-          │               Extension ClassLoader ──► "Can parent load it?"
-          │                        │                       │
-          │                        │                       ▼
-          │                        │              Bootstrap ClassLoader
-          │                        │                       │
-          │                        │          "No, not in rt.jar"
-          │                        │                       │
-          │               "No, not in ext"  ◄──────────────┘
-          │                        │
-    "Found in classpath" ◄─────────┘
+```mermaid
+flowchart TD
+  appTry[AppClassLoaderLoadRequest] --> parentTry[DelegateToParent]
+  parentTry --> foundCheck{"FoundByParent?"}
+  foundCheck -->|Yes| parentResult[ReturnParentClass]
+  foundCheck -->|No| appLoad[LoadFromAppClasspath]
 ```
 
-- Child delegates to parent first
-- Only if parent can't load, child tries
-- **Security**: Prevents loading fake `java.lang.String`
-
-**2. Visibility Principle**
-- Child ClassLoader can see classes loaded by parent
-- Parent cannot see classes loaded by child
-
-```java
-// Classes loaded by Bootstrap are visible to all
-// Classes loaded by App ClassLoader not visible to Extension ClassLoader
-```
-
-**3. Uniqueness Principle**
-- A class is loaded only once by a ClassLoader
-- Same class can be loaded by different ClassLoaders (different Class objects!)
-
-```java
-// Two classes with same name from different ClassLoaders are different
-Class<?> c1 = loader1.loadClass("MyClass");
-Class<?> c2 = loader2.loadClass("MyClass");
-c1 == c2;  // false if different ClassLoaders
-```
+**Security benefit:** delegation prevents app code from spoofing trusted core Java classes.
 
 <a id="q8"></a>
 ### Q8: What are the phases of class loading (Loading, Linking, Initialization)?
 **Answer:**
+Three major phases:
+1. **Loading**: read class bytes and create `Class` object.
+2. **Linking**:
+   - Verify bytecode
+   - Prepare static memory/defaults
+   - Resolve symbolic references (may be lazy)
+3. **Initialization**: run static initializers and assign static fields.
 
-```
-.class file ──► LOADING ──► LINKING ──► INITIALIZATION ──► Ready to use
-                              │
-                   ┌──────────┼──────────┐
-                   ▼          ▼          ▼
-              Verification  Prepare   Resolution
-```
-
-**1. Loading**
-- Read `.class` file bytecode
-- Create `Class` object in Heap
-- Store class metadata:
-  - Fully Qualified Class Name (FQCN)
-  - Parent class information
-  - Methods, fields, constructors
-  - Whether class, interface, or enum
-
-**2. Linking**
-
-| Sub-phase | Description |
-|-----------|-------------|
-| **Verification** | Verify bytecode is valid, comes from valid compiler, correct structure |
-| **Preparation** | Allocate memory for static variables, assign DEFAULT values (not initial!) |
-| **Resolution** | Replace symbolic references with direct memory references |
-
-```java
-// During Preparation:
-static int year = 2024;  // year is set to 0 (default), NOT 2024
-
-// During Resolution:
-// "Employee" string reference → actual memory address
+```mermaid
+flowchart LR
+  loadPhase[Loading] --> verifyPhase[Verify]
+  verifyPhase --> preparePhase[Prepare]
+  preparePhase --> resolvePhase[Resolve]
+  resolvePhase --> initPhase[Initialization]
 ```
 
-**3. Initialization**
-- Assign actual values to static variables
-- Execute static blocks in order of appearance
-
-```java
-public class Example {
-    static int x = 10;           // Assigned here (not in Preparation)
-    
-    static {
-        System.out.println("Static block executed");
-    }
-}
-```
-
-**Important:** Every class must be initialized before its **active use**:
-- Creating instance (`new`)
-- Accessing static field/method
-- Reflection
-- Initializing subclass
+**Interview pitfall:** static init order across classes can cause subtle startup failures.
 
 ---
 
@@ -372,200 +228,110 @@ public class Example {
 <a id="q9"></a>
 ### Q9: What are the JVM Memory Areas (Runtime Data Areas)?
 **Answer:**
-JVM divides memory into 5 areas:
+Runtime data areas are split into shared (per JVM) and per-thread regions.
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   PER JVM (Shared)                       │
-│  ┌─────────────────────┐  ┌──────────────────────────┐  │
-│  │     METHOD AREA     │  │          HEAP            │  │
-│  │  (Class metadata,   │  │  (Objects, instance      │  │
-│  │   static variables, │  │   variables, arrays)     │  │
-│  │   constant pool)    │  │                          │  │
-│  └─────────────────────┘  └──────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────┐
-│               PER THREAD (Not shared)                    │
-│  ┌──────────┐  ┌──────────────┐  ┌───────────────────┐  │
-│  │  STACK   │  │  PC REGISTER │  │  NATIVE METHOD    │  │
-│  │ (Frames, │  │ (Next instr  │  │      STACK        │  │
-│  │  locals) │  │   address)   │  │  (Native methods) │  │
-│  └──────────┘  └──────────────┘  └───────────────────┘  │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+  runtimeNode[RuntimeDataAreas]
+  sharedNode[SharedPerJVM]
+  threadNode[PerThread]
+  runtimeNode --> sharedNode
+  runtimeNode --> threadNode
+  sharedNode --> heapNode[Heap]
+  sharedNode --> methodNode[MethodAreaMetaspace]
+  threadNode --> stackNode[JavaStack]
+  threadNode --> pcNode[PCRegister]
+  threadNode --> nativeStackNode[NativeMethodStack]
 ```
 
-| Area | Scope | Contents |
-|------|-------|----------|
-| Method Area | Per JVM | Class info, static vars, constant pool |
-| Heap | Per JVM | Objects, arrays |
-| Stack | Per Thread | Method frames, local variables |
-| PC Register | Per Thread | Current instruction address |
-| Native Stack | Per Thread | Native method data |
+| Area | Shared? | Stores |
+|------|---------|--------|
+| Heap | Yes | Objects and arrays |
+| Method Area/Metaspace | Yes | Class metadata, runtime constants, static info |
+| Java Stack | No (per thread) | Frames, local vars, operand stack |
+| PC Register | No | Current instruction pointer |
+| Native Method Stack | No | Native method call state |
 
 <a id="q10"></a>
 ### Q10: What is the Method Area?
 **Answer:**
-Method Area (also called Metaspace in Java 8+) stores class-level data.
+Method Area stores class-level metadata:
+- class structure and method metadata
+- runtime constant pool
+- static fields
 
-**Contains:**
-- Class structure (fields, methods, constructors)
-- Runtime constant pool
-- Static variables
-- Method bytecode
-- Field and method data
+In HotSpot (Java 8+), class metadata is in **Metaspace** (native memory), replacing PermGen.
 
-```java
-public class Employee {
-    // Stored in Method Area:
-    private static int count = 0;     // Static variable
-    private static final String COMPANY = "XYZ";  // Constant
-    
-    public void work() { }  // Method bytecode
-}
-```
-
-**Metaspace (Java 8+):**
-- Replaced PermGen
-- Uses native memory (not heap)
-- Auto-grows (configurable with `-XX:MaxMetaspaceSize`)
+**Why it matters:**
+- Excessive dynamic class generation can trigger `OutOfMemoryError: Metaspace`.
+- Classloader leaks (e.g., app server redeploy issues) are a common metaspace leak root.
 
 <a id="q11"></a>
 ### Q11: What is the Heap Area?
 **Answer:**
-Heap is shared memory where all objects and arrays are stored.
+Heap is the primary GC-managed memory for objects/arrays.
 
-```
-┌─────────────────────────────────────────────────────┐
-│                        HEAP                          │
-│  ┌─────────────────────────────────────────────┐    │
-│  │            YOUNG GENERATION                  │    │
-│  │  ┌────────────┬─────────┬─────────┐         │    │
-│  │  │   EDEN     │   S0    │   S1    │         │    │
-│  │  │ (new objs) │(survivor)│(survivor)│        │    │
-│  │  └────────────┴─────────┴─────────┘         │    │
-│  └─────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────┐    │
-│  │           OLD GENERATION (Tenured)           │    │
-│  │        (Long-lived objects)                  │    │
-│  └─────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────┘
+Typical generational layout:
+- Young generation (Eden + Survivor spaces)
+- Old generation (tenured objects)
+
+```mermaid
+flowchart LR
+  heapRoot[Heap] --> youngNode[YoungGeneration]
+  heapRoot --> oldNode[OldGeneration]
+  youngNode --> edenNode[Eden]
+  youngNode --> s0Node[SurvivorS0]
+  youngNode --> s1Node[SurvivorS1]
 ```
 
-**Characteristics:**
-- Shared among all threads
-- Created when JVM starts
-- Objects are garbage collected here
-- Divided into Young and Old generations
-
-**Heap sizing:**
-```bash
--Xms512m    # Initial heap size
--Xmx2g      # Maximum heap size
--Xmn256m    # Young generation size
-```
+Objects usually start in Eden; long-lived survivors are promoted to Old generation.
 
 <a id="q12"></a>
 ### Q12: What is the Stack Area?
 **Answer:**
-Each thread has its own stack that stores method invocation data.
+Each thread has a private Java stack composed of frames (one frame per active method call).
 
-**Structure:**
-```
-Thread Stack
-┌─────────────────────────┐
-│  Frame: method3()       │  ← Top (current method)
-│  ┌───────────────────┐  │
-│  │ Local Variables   │  │
-│  │ Operand Stack     │  │
-│  │ Frame Data        │  │
-│  └───────────────────┘  │
-├─────────────────────────┤
-│  Frame: method2()       │
-├─────────────────────────┤
-│  Frame: method1()       │
-├─────────────────────────┤
-│  Frame: main()          │  ← Bottom
-└─────────────────────────┘
+Frame contains:
+- local variable table
+- operand stack
+- method return/link info
+
+```java
+void a() { b(); }
+void b() { c(); }
+void c() { /* top frame */ }
 ```
 
-**Stack Frame contains:**
-1. **Local Variables Array** - method parameters, local variables
-2. **Operand Stack** - intermediate calculation results
-3. **Frame Data** - constant pool reference, exception table
-
-**Behavior:**
-- New frame pushed when method called
-- Frame popped when method returns or throws uncaught exception
-- LIFO (Last In, First Out)
-- `StackOverflowError` if stack is full (deep recursion)
-
-```bash
--Xss512k    # Stack size per thread
-```
+Deep/infinite recursion can exhaust stack memory and throw `StackOverflowError`.
 
 <a id="q13"></a>
 ### Q13: What are PC Registers and Native Method Stack?
 **Answer:**
+- **PC Register (per thread):** points to current bytecode instruction being executed.
+- **Native Method Stack (per thread):** supports execution state for JNI/native method calls.
 
-**PC (Program Counter) Register:**
-- Each thread has its own PC Register
-- Holds address of current JVM instruction being executed
-- If executing native method, PC Register is undefined
+When Java thread enters native code, execution context shifts to native stack management.
 
-```
-Thread 1: PC = 0x1234 (bytecode instruction address)
-Thread 2: PC = 0x5678
-Thread 3: PC = undefined (executing native method)
-```
-
-**Native Method Stack:**
-- Similar to JVM Stack but for native methods
-- Used when Java calls C/C++ code via JNI
-- Each thread has its own native method stack
-
-```java
-// Example: System.currentTimeMillis() calls native code
-public static native long currentTimeMillis();
-// This executes in Native Method Stack
-```
+**Debugging insight:** native crashes often appear outside normal Java stack traces.
 
 <a id="q14"></a>
 ### Q14: What is the Java Memory Model (JMM)?
 **Answer:**
-The Java Memory Model (JMM) defines how threads interact with memory and ensures consistency across platforms.
+JMM defines how threads interact through memory: visibility, ordering, and happens-before guarantees.
 
-**Memory structure:**
-```
-Thread 1         Thread 2         Thread 3
-┌───────┐       ┌───────┐       ┌───────┐
-│ Stack │       │ Stack │       │ Stack │
-│ Cache │       │ Cache │       │ Cache │
-└───┬───┘       └───┬───┘       └───┬───┘
-    └───────────────┼───────────────┘
-                    ▼
-            ┌─────────────┐
-            │ Main Memory │ (Heap)
-            └─────────────┘
+Key guarantees:
+- `volatile` write happens-before subsequent `volatile` read of same variable.
+- Lock release happens-before subsequent lock acquire on same monitor.
+- Thread start/join establish ordering edges.
+
+```mermaid
+flowchart LR
+  writeThread[ThreadAWrite] --> volatilePublish[VolatileWrite]
+  volatilePublish --> volatileRead[VolatileRead]
+  volatileRead --> readThread[ThreadBSeesUpdatedValue]
 ```
 
-**Key concepts:**
-- **Visibility**: When changes by one thread become visible to others
-- **Atomicity**: Operations that execute completely or not at all
-- **Happens-before**: Guarantees ordering between operations
-
-**Visibility solutions:**
-```java
-volatile boolean running = true;  // Visibility guaranteed
-// Or synchronized, or Atomic classes
-```
-
-**Happens-before rules:**
-1. Program order within a thread
-2. Monitor lock/unlock
-3. Volatile write → volatile read
-4. Thread.start() → first action in started thread
-5. Last action in thread → Thread.join() returns
+**Critical distinction:** visibility/order is not full atomicity for compound operations (`count++` still unsafe without lock/atomic class).
 
 ---
 
@@ -574,103 +340,53 @@ volatile boolean running = true;  // Visibility guaranteed
 <a id="q15"></a>
 ### Q15: What is the Execution Engine and its components?
 **Answer:**
-Execution Engine converts bytecode to machine code and executes it.
+Execution Engine runs bytecode and improves performance over time.
 
-```
-┌─────────────────────────────────────────────────────┐
-│                 EXECUTION ENGINE                     │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────┐  │
-│  │ INTERPRETER │  │ JIT COMPILER │  │  GARBAGE   │  │
-│  │             │  │              │  │ COLLECTOR  │  │
-│  │ Line by line│  │ Compiles hot │  │            │  │
-│  │ execution   │  │ code to      │  │ Frees      │  │
-│  │             │  │ native code  │  │ memory     │  │
-│  └─────────────┘  └──────────────┘  └────────────┘  │
-└─────────────────────────────────────────────────────┘
-```
+Main parts:
+- **Interpreter**: executes bytecode instruction-by-instruction.
+- **JIT compiler**: compiles hot code to native machine code.
+- **Garbage Collector**: reclaims unreachable memory.
 
-| Component | Role |
-|-----------|------|
-| **Interpreter** | Executes bytecode line by line |
-| **JIT Compiler** | Compiles frequently used code to native |
-| **Garbage Collector** | Reclaims unused memory |
+```mermaid
+flowchart TD
+  byteCodeNode[Bytecode] --> interpreterNode[Interpreter]
+  interpreterNode --> profileNode[ProfilerHotMethods]
+  profileNode --> jitNode[JITCompiler]
+  jitNode --> nativeCodeNode[NativeCodeCache]
+  nativeCodeNode --> cpuExecNode[CPUExecution]
+```
 
 <a id="q16"></a>
 ### Q16: What is the difference between Interpreter and JIT Compiler?
 **Answer:**
-
 | Interpreter | JIT Compiler |
 |-------------|--------------|
-| Executes bytecode line by line | Compiles entire method to native code |
-| Fast startup | Slower startup, faster execution |
-| Re-interprets same code each call | Caches compiled code |
-| Lower memory usage | Higher memory for compiled code |
-| Default execution mode | Kicks in for "hot" code |
+| Starts quickly | Needs warm-up/profiling |
+| Executes bytecode line-by-line | Produces optimized native code |
+| Lower peak performance | Higher peak throughput |
+| No compile overhead | Compile overhead + code cache usage |
 
-**How they work together:**
-```
-Bytecode
-    │
-    ▼
-Interpreter ──────────────────► Execute line by line
-    │
-    │ (Method called many times - detected by Profiler)
-    ▼
-JIT Compiler ──► Compile to native ──► Cache ──► Execute native
-```
-
-**JIT Compilation Trigger:**
-- Method invocation threshold (default ~10,000 calls)
-- Loop back-edge threshold
-
-```bash
-# JIT tuning
--XX:CompileThreshold=10000    # Invocations before JIT
--XX:+PrintCompilation         # Log JIT compilations
-```
+Typical lifecycle: interpreter first, JIT later for hot methods.
 
 <a id="q17"></a>
 ### Q17: How does JIT Compiler optimize code?
 **Answer:**
-JIT Compiler includes several optimization components:
-
-**Components:**
-1. **Profiler** - Identifies "hot spots" (frequently executed code)
-2. **Intermediate Code Generator** - Creates intermediate representation
-3. **Code Optimizer** - Applies optimizations
-4. **Target Code Generator** - Generates native machine code
-
-**Optimizations performed:**
-
-| Optimization | Description |
-|--------------|-------------|
-| **Inlining** | Replace method call with method body |
-| **Dead Code Elimination** | Remove unreachable code |
-| **Loop Unrolling** | Reduce loop overhead |
-| **Escape Analysis** | Allocate on stack if object doesn't escape |
-| **Constant Folding** | Compute constants at compile time |
-| **Null Check Elimination** | Remove redundant null checks |
+JIT uses runtime profiling data to apply aggressive optimizations on hot paths:
+- method inlining
+- loop unrolling
+- dead code elimination
+- escape analysis and scalar replacement
+- lock coarsening/elimination where safe
 
 ```java
-// Before optimization
-for (int i = 0; i < 100; i++) {
-    result += getValue();  // Method call overhead
-}
-
-// After inlining
-for (int i = 0; i < 100; i++) {
-    result += 42;  // Method body inlined
+for (int i = 0; i < n; i++) {
+    sum += arr[i];
 }
 ```
 
-**Tiered Compilation (Java 7+):**
-- Level 0: Interpreted
-- Level 1-3: C1 compiler (quick compilation)
-- Level 4: C2 compiler (aggressive optimizations)
+On hot loops like above, JIT can heavily optimize machine code compared with interpreter execution.
 
-```bash
--XX:+TieredCompilation    # Enable tiered compilation (default)
-```
+**Trade-off:** more aggressive optimization can increase warm-up time and code cache usage.
 
 ---
 
@@ -679,238 +395,137 @@ for (int i = 0; i < 100; i++) {
 <a id="q18"></a>
 ### Q18: How does Garbage Collection work in Java?
 **Answer:**
-GC automatically frees memory occupied by unreachable objects.
+GC automatically reclaims memory for objects that are no longer reachable from GC roots.
 
-**Phases:**
-1. **Mark Phase**: GC identifies all reachable objects starting from GC roots
-2. **Sweep Phase**: Unreachable objects are removed from memory
-3. **Compact Phase** (optional): Memory is defragmented
+High-level cycle:
+1. Identify reachable vs unreachable objects.
+2. Reclaim unreachable memory.
+3. Optionally compact/relocate live objects (collector-dependent).
 
-**Generational GC:**
-```
-┌─────────────────────────────────────────────────────┐
-│  YOUNG GENERATION (Minor GC - frequent, fast)       │
-│  ┌────────────┬──────────┬──────────┐               │
-│  │   EDEN     │    S0    │    S1    │               │
-│  │ (new objs) │(survivor)│(survivor)│               │
-│  └────────────┴──────────┴──────────┘               │
-│                     ↓ (survives multiple GCs)       │
-│  OLD GENERATION (Major GC - infrequent, slow)       │
-│  ┌─────────────────────────────────────┐            │
-│  │            TENURED                   │            │
-│  └─────────────────────────────────────┘            │
-└─────────────────────────────────────────────────────┘
-```
-
-**Object lifecycle:**
-1. New object created in **Eden**
-2. Survives Minor GC → moved to **Survivor** (S0 or S1)
-3. Survives multiple Minor GCs → promoted to **Old Generation**
+Java uses **generational GC** because most objects die young.
 
 <a id="q19"></a>
 ### Q19: What are the different types of Garbage Collectors?
 **Answer:**
+Common HotSpot collectors:
 
-| Collector | Description | Use Case | Flag |
-|-----------|-------------|----------|------|
-| **Serial GC** | Single-threaded, simple | Small apps, single CPU | `-XX:+UseSerialGC` |
-| **Parallel GC** | Multi-threaded STW | Throughput-focused | `-XX:+UseParallelGC` |
-| **G1 GC** | Region-based, concurrent | General purpose (default Java 9+) | `-XX:+UseG1GC` |
-| **ZGC** | Concurrent, low latency | Large heaps, <10ms pauses | `-XX:+UseZGC` |
-| **Shenandoah** | Concurrent compaction | Low pause times | `-XX:+UseShenandoahGC` |
+| Collector | Goal | Typical fit |
+|-----------|------|-------------|
+| Serial GC | Simplicity, single-threaded GC | small heaps, simple apps |
+| Parallel GC | Throughput | batch jobs, CPU-heavy throughput workloads |
+| G1 GC | Balanced latency/throughput | general server default |
+| ZGC | Very low pause time | large heaps, latency-sensitive services |
+| Shenandoah | Low pause with concurrent compaction | latency-focused workloads |
 
-**G1 GC (Garbage First):**
-```
-┌────┬────┬────┬────┬────┬────┬────┬────┐
-│ E  │ S  │ O  │ E  │ O  │ H  │ E  │ O  │  (Regions)
-└────┴────┴────┴────┴────┴────┴────┴────┘
-E=Eden, S=Survivor, O=Old, H=Humongous (large objects)
-```
+**Practical guidance:** start with G1 defaults, move to ZGC/Shenandoah only when latency profile requires it.
 
 <a id="q20"></a>
 ### Q20: What makes an object eligible for garbage collection?
 **Answer:**
-An object becomes eligible when it's **unreachable** from any GC Root.
+An object is eligible when it is **unreachable from any GC root**.
 
-**Ways to become unreachable:**
-1. **Reference set to null**
-   ```java
-   Person p = new Person();
-   p = null;  // Object eligible for GC
-   ```
+Typical ways objects become unreachable:
+- reference set to `null`
+- reference variable goes out of scope
+- owning object becomes unreachable
+- classloader unloading drops static references
 
-2. **Reference reassigned**
-   ```java
-   Person p = new Person("John");
-   p = new Person("Jane");  // "John" object eligible
-   ```
-
-3. **Local scope ends**
-   ```java
-   void method() {
-       Person p = new Person();  // Created
-   }  // p goes out of scope, object eligible
-   ```
-
-4. **Island of isolation** (circular references with no external refs)
-   ```java
-   class Node { Node next; }
-   Node a = new Node();
-   Node b = new Node();
-   a.next = b;
-   b.next = a;
-   a = null;
-   b = null;  // Both nodes eligible (circular but unreachable)
-   ```
+Circular references are still collectible if the cycle is not reachable from roots.
 
 <a id="q21"></a>
 ### Q21: What is the difference between Minor GC and Major GC?
 **Answer:**
+| Minor GC | Major/Old GC |
+|----------|--------------|
+| Targets young generation | Targets old generation |
+| More frequent | Less frequent |
+| Usually shorter pauses | Usually longer pauses |
+| Reclaims short-lived objects | Reclaims long-lived objects |
 
-| Minor GC | Major GC (Full GC) |
-|----------|-------------------|
-| Cleans Young Generation | Cleans Old Generation (and sometimes Young) |
-| Very fast (milliseconds) | Slower (can be seconds) |
-| Frequent | Less frequent |
-| Uses copying algorithm | Uses mark-sweep-compact |
-| Short STW pause | Longer STW pause |
-
-```
-Young Gen [Eden | S0 | S1] → Minor GC
-Old Gen [Tenured]          → Major GC
-```
-
-**When Major GC occurs:**
-- Old Generation is full
-- Metaspace is full
-- `System.gc()` called (not guaranteed)
-- Promotion failure (not enough space in Old Gen)
+Some tools also use **Full GC** to mean whole-heap collection (young + old + metadata depending on collector/JVM).
 
 <a id="q22"></a>
 ### Q22: What are GC Roots?
 **Answer:**
-GC Roots are the starting points for the garbage collector to determine which objects are reachable.
+GC roots are starting points for reachability traversal.
 
-**Types of GC Roots:**
-1. **Local variables** in stack frames of active threads
-2. **Active threads** themselves
-3. **Static variables** of loaded classes
-4. **JNI references** (native code references)
-5. **Synchronized monitors** (objects used in synchronized blocks)
-6. **Class loaders** and classes they've loaded
+Common roots:
+- local variables on thread stacks
+- static fields
+- active thread objects
+- JNI references
+- monitor/VM internal references
 
+```mermaid
+flowchart TD
+  rootsNode[GCRoots] --> stackRoot[StackLocalReference]
+  rootsNode --> staticRoot[StaticFieldReference]
+  rootsNode --> jniRoot[JNIReference]
+  stackRoot --> objA[ObjectA]
+  objA --> objB[ObjectB]
+  objC[ObjectCUnreachable]
 ```
-GC Roots
-    │
-    ├── Thread stacks (local vars)
-    │       └── obj1 ──► obj2 ──► obj3  ✓ Reachable
-    │
-    ├── Static variables
-    │       └── obj4 ──► obj5  ✓ Reachable
-    │
-    └── Active threads
-            └── obj6  ✓ Reachable
 
-    obj7 ◄──► obj8  (circular but no root) ✗ Eligible for GC
-```
+`ObjectCUnreachable` is collectible because no root path reaches it.
 
 <a id="q23"></a>
 ### Q23: What is Stop-the-World (STW) pause?
 **Answer:**
-STW pause is when the JVM halts all application threads to perform garbage collection safely.
+STW is a period where application threads are paused so JVM can perform a critical GC phase safely.
 
-**Why needed:**
-- Ensures object graph doesn't change during GC
-- Prevents moving objects while references exist
+Even low-latency collectors may still have short STW checkpoints.
 
-**Minimizing STW:**
-| Collector | STW Behavior |
-|-----------|--------------|
-| Serial GC | Long STW pauses |
-| Parallel GC | Shorter but still noticeable |
-| G1 GC | Predictable, configurable pause targets |
-| ZGC | Sub-millisecond pauses (<10ms) |
-| Shenandoah | Concurrent, minimal STW |
+Impact:
+- increased tail latency (p95/p99)
+- request timeouts in latency-sensitive services
 
-```bash
-# Set max pause time target for G1
--XX:MaxGCPauseMillis=200
-```
+Mitigation:
+- choose suitable collector
+- tune heap/GC targets
+- reduce allocation pressure
+- profile pauses with GC logs/JFR
 
 <a id="q24"></a>
 ### Q24: What are Weak, Soft, and Phantom References?
 **Answer:**
-
-| Reference Type | Collected When | Use Case |
-|---------------|----------------|----------|
-| **Strong** | Never (while reachable) | Normal references |
-| **Soft** | When memory is low | Caches |
-| **Weak** | Next GC cycle | Canonicalizing mappings |
-| **Phantom** | After finalization | Pre-mortem cleanup |
+| Reference Type | Collection behavior | Typical use |
+|----------------|---------------------|-------------|
+| WeakReference | Cleared eagerly on next GC if only weakly reachable | canonical maps, weak-key caches |
+| SoftReference | Cleared under memory pressure | memory-sensitive caches (not strict cache policy) |
+| PhantomReference | Enqueued after object becomes phantom reachable | post-mortem cleanup tracking |
 
 ```java
-// Strong - normal reference
-Object obj = new Object();
-
-// Soft - collected when memory needed
-SoftReference<Object> soft = new SoftReference<>(new Object());
-
-// Weak - collected on next GC
-WeakReference<Object> weak = new WeakReference<>(new Object());
-
-// Phantom - for cleanup notifications
-ReferenceQueue<Object> queue = new ReferenceQueue<>();
-PhantomReference<Object> phantom = new PhantomReference<>(obj, queue);
+ReferenceQueue<MyObj> queue = new ReferenceQueue<>();
+PhantomReference<MyObj> ref = new PhantomReference<>(obj, queue);
+obj = null; // later GC may enqueue ref
 ```
 
-**Practical uses:**
-- `WeakHashMap` - cache that allows GC of keys
-- `SoftReference` - memory-sensitive caches
-- `PhantomReference` - cleanup before/after finalization
+**Important:** do not use these references as primary lifecycle control; explicit resource management is safer.
 
 <a id="q25"></a>
 ### Q25: How do you tune and monitor Garbage Collection?
 **Answer:**
+Start with measurement, not guesswork.
 
-**Common JVM flags:**
+Useful runtime flags:
 ```bash
-# Choose GC algorithm
--XX:+UseG1GC              # G1 (default Java 9+)
--XX:+UseZGC               # ZGC (low latency)
--XX:+UseParallelGC        # Parallel (throughput)
-
-# Heap sizing
--Xms4g                    # Initial heap size
--Xmx4g                    # Maximum heap size
--XX:NewRatio=2            # Old/Young ratio (Old = 2x Young)
--XX:SurvivorRatio=8       # Eden/Survivor ratio
-
-# G1 specific
--XX:MaxGCPauseMillis=200  # Target pause time
--XX:G1HeapRegionSize=16m  # Region size
-
-# GC logging (Java 9+)
--Xlog:gc*:file=gc.log:time,uptime:filecount=5,filesize=10m
-
-# GC logging (Java 8)
--XX:+PrintGCDetails -XX:+PrintGCDateStamps -Xloggc:gc.log
+java -Xms2g -Xmx2g -XX:+UseG1GC -Xlog:gc*:file=gc.log:time,level,tags -jar app.jar
 ```
 
-**Monitoring tools:**
-1. **JVisualVM**: Visual monitoring and profiling
-2. **JConsole**: JMX-based monitoring
-3. **GC logs**: Analyze with GCViewer or GCEasy
-4. **jstat**: Command-line GC statistics
-5. **Flight Recorder**: Low-overhead profiling
-6. **jcmd**: Diagnostic commands
+Useful tools:
+- `jstat -gc <pid> 1s`
+- `jcmd <pid> GC.heap_info`
+- Java Flight Recorder (JFR)
+- GC log analyzers
 
-```bash
-# jstat example
-jstat -gc <pid> 1000  # GC stats every 1 second
+Key metrics to monitor:
+- allocation rate
+- pause times (p95/p99)
+- promotion rate
+- old generation occupancy
+- full GC frequency
 
-# jcmd example
-jcmd <pid> GC.heap_info
-```
+**Tuning order:** right-size heap, fix allocation hotspots, then tweak collector-specific knobs.
 
 ---
 
@@ -919,53 +534,52 @@ jcmd <pid> GC.heap_info
 <a id="q26"></a>
 ### Q26: What is the difference between Truststore and Keystore?
 **Answer:**
-
 | Keystore | Truststore |
 |----------|------------|
-| Stores YOUR private keys and certificates | Stores TRUSTED certificates (CAs) |
-| Used to prove YOUR identity | Used to verify OTHERS' identity |
-| Server uses to prove identity to clients | Client uses to verify server identity |
-| `-Djavax.net.ssl.keyStore` | `-Djavax.net.ssl.trustStore` |
+| Stores your private key + certificate chain (identity) | Stores trusted CA/server certificates (trust anchors) |
+| Used to prove who you are | Used to verify peer identity |
+| Typically needed on server side | Typically needed on client side (and server for mTLS) |
 
+```mermaid
+flowchart LR
+  keyStoreNode[KeystoreIdentity] --> tlsHandshake[TLSHandshake]
+  trustStoreNode[TruststoreCA] --> tlsHandshake
+  tlsHandshake --> secureChannel[SecureChannel]
 ```
-TLS Handshake:
-Server                              Client
-┌─────────────┐                    ┌─────────────┐
-│  KEYSTORE   │──Certificate──────►│ TRUSTSTORE  │
-│ (identity)  │                    │ (validation)│
-└─────────────┘                    └─────────────┘
-```
+
+In mutual TLS, both sides can use both stores.
 
 <a id="q27"></a>
 ### Q27: How do you create and manage Truststore and Keystore?
 **Answer:**
+Common `keytool` operations:
 
-**Using keytool:**
 ```bash
-# Create keystore with new key pair
-keytool -genkeypair -alias mykey -keyalg RSA -keysize 2048 \
-    -keystore keystore.jks -validity 365
+# Create keystore with keypair
+keytool -genkeypair -alias app -keyalg RSA -keysize 2048 \
+  -keystore keystore.p12 -storetype PKCS12
 
-# Export certificate
-keytool -exportcert -alias mykey -keystore keystore.jks -file cert.cer
+# List entries
+keytool -list -v -keystore keystore.p12
 
-# Import into truststore
-keytool -importcert -alias serverkey -file cert.cer -keystore truststore.jks
-
-# List contents
-keytool -list -keystore keystore.jks
+# Import certificate into truststore
+keytool -importcert -alias server-cert -file server.crt \
+  -keystore truststore.p12 -storetype PKCS12
 ```
 
-**Spring Boot configuration:**
-```yaml
-server:
-  ssl:
-    key-store: classpath:keystore.p12
-    key-store-password: ${KEY_STORE_PASSWORD}
-    key-store-type: PKCS12
-    trust-store: classpath:truststore.jks
-    trust-store-password: ${TRUST_STORE_PASSWORD}
+Runtime configuration example:
+```bash
+-Djavax.net.ssl.keyStore=keystore.p12
+-Djavax.net.ssl.keyStorePassword=changeit
+-Djavax.net.ssl.trustStore=truststore.p12
+-Djavax.net.ssl.trustStorePassword=changeit
 ```
+
+Management best practices:
+- prefer PKCS12 over legacy JKS in modern setups
+- rotate keys/certs before expiry
+- keep private keys encrypted and access-controlled
+- never commit store passwords in source control
 
 ---
 

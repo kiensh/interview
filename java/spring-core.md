@@ -41,72 +41,70 @@
 <a id="q1"></a>
 ### Q1: What is Dependency Injection (DI)?
 **Answer:**
-DI is a design pattern where objects receive their dependencies from external sources rather than creating them internally.
+Dependency Injection means an object receives its dependencies from outside instead of constructing them internally.
 
-**Benefits:**
-- Loose coupling between classes
-- Easier unit testing (can inject mocks)
-- Better code reusability
-- Follows Single Responsibility Principle
-
-**Types in Spring:**
 ```java
-// 1. Constructor Injection (preferred)
 @Service
 public class UserService {
     private final UserRepository userRepository;
-    
+
     public UserService(UserRepository userRepository) {
         this.userRepository = userRepository;
     }
 }
-
-// 2. Setter Injection
-@Autowired
-public void setUserRepository(UserRepository repo) { this.repo = repo; }
-
-// 3. Field Injection (not recommended)
-@Autowired
-private UserRepository userRepository;
 ```
+
+**Why DI matters in real systems:**
+- Reduces coupling between components.
+- Improves testability (inject mocks/fakes).
+- Makes wiring explicit and environment-specific (prod vs test).
+- Supports clean layering and easier refactoring.
 
 <a id="q2"></a>
 ### Q2: Why is Constructor Injection preferred over Field Injection?
 **Answer:**
-1. **Immutability**: Dependencies can be `final`
-2. **Required dependencies are explicit**: Won't compile without them
-3. **Easier testing**: No reflection needed to inject mocks
-4. **Prevents circular dependencies**: Fails fast at startup
-5. **Framework independence**: Works without Spring context
+Constructor injection is preferred because dependencies become explicit and immutable.
+
+| Constructor Injection | Field Injection |
+|----------------------|-----------------|
+| Supports `final` fields | Mutable dependencies |
+| Fails fast on missing required deps | Missing dependency may fail later |
+| Easy plain unit testing | Usually needs reflection/container |
+| Clear API contract | Hidden required dependencies |
 
 ```java
 @Service
-@RequiredArgsConstructor  // Lombok generates constructor
-public class UserService {
-    private final UserRepository userRepository;
-    private final EmailService emailService;
+public class OrderService {
+    private final PaymentClient paymentClient;
+    private final OrderRepository orderRepository;
+
+    public OrderService(PaymentClient paymentClient, OrderRepository orderRepository) {
+        this.paymentClient = paymentClient;
+        this.orderRepository = orderRepository;
+    }
 }
 ```
+
+**Practical tip:** Use constructor injection for required dependencies; optional deps can use setter/object provider.
 
 <a id="q3"></a>
 ### Q3: What is IoC and how does Spring implement it?
 **Answer:**
-**IoC (Inversion of Control)**: Design principle where control of object creation is transferred from application code to a container.
+**IoC (Inversion of Control)** means object creation/lifecycle moves from application code to a container.
+
+Spring implements IoC through `BeanFactory`/`ApplicationContext`, which handles:
+1. Bean creation
+2. Dependency resolution and injection
+3. Lifecycle callbacks
+4. Proxy wrapping (AOP, transactions, security)
 
 ```java
-// Traditional approach (tight coupling)
-public class UserService {
-    private UserRepository repo = new UserRepositoryImpl();
-}
-
-// IoC approach (loose coupling)
-public class UserService {
-    private UserRepository repo;  // Injected by container
-    public UserService(UserRepository repo) { this.repo = repo; }
-}
+AnnotationConfigApplicationContext context =
+    new AnnotationConfigApplicationContext(AppConfig.class);
+UserService service = context.getBean(UserService.class);
 ```
 
-**Spring's IoC Container** (ApplicationContext) manages bean instantiation, configuration, and assembly.
+**Interview angle:** IoC is the principle; DI is one concrete mechanism.
 
 ---
 
@@ -115,44 +113,58 @@ public class UserService {
 <a id="q4"></a>
 ### Q4: What is the difference between @Component, @Service, @Repository, and @Controller?
 **Answer:**
-All are specializations of `@Component`:
+All are stereotype annotations discovered by component scanning, but each signals intent.
 
-| Annotation | Layer | Special Features |
-|------------|-------|------------------|
-| @Component | Generic | Base annotation for Spring-managed beans |
-| @Service | Service/Business | Semantic marker for business logic |
-| @Repository | Data Access | Exception translation to DataAccessException |
-| @Controller | Web | Used with @RequestMapping for MVC |
-| @RestController | Web | @Controller + @ResponseBody combined |
+| Annotation | Typical layer | Extra behavior |
+|------------|---------------|----------------|
+| `@Component` | Generic | Base stereotype |
+| `@Service` | Business/service | Semantic marker for service logic |
+| `@Repository` | Persistence | Exception translation into `DataAccessException` |
+| `@Controller` | MVC web | Works with request mapping/view resolution |
+| `@RestController` | REST web | `@Controller` + `@ResponseBody` |
+
+Use the most specific stereotype so code communicates architecture clearly.
 
 <a id="q5"></a>
 ### Q5: What is the difference between @Autowired, @Inject, and @Resource?
 **Answer:**
-| @Autowired | @Inject | @Resource |
-|------------|---------|-----------|
-| Spring annotation | JSR-330 (Java standard) | JSR-250 (Java standard) |
-| By type, then by name | By type, then by name | By name, then by type |
-| Has `required` attribute | No required attribute | Has `name` attribute |
+| Annotation | Standard | Primary resolution strategy | Notes |
+|------------|----------|-----------------------------|-------|
+| `@Autowired` | Spring | by type (then qualifiers/name) | Supports `required=false` |
+| `@Inject` | JSR-330 | by type | Portable, no `required` flag |
+| `@Resource` | JSR-250 | by name (then type) | Useful for name-based injection |
+
+```java
+@Autowired
+@Qualifier("emailNotifier")
+private Notifier notifier;
+```
+
+In Spring-heavy projects, `@Autowired` is most common; use standards if portability is required.
 
 <a id="q6"></a>
 ### Q6: What does @Qualifier do?
 **Answer:**
-Used when multiple beans of the same type exist:
+`@Qualifier` disambiguates beans when multiple candidates share the same type.
 
 ```java
 @Component("emailNotifier")
-public class EmailNotifier implements Notifier { }
+class EmailNotifier implements Notifier {}
 
 @Component("smsNotifier")
-public class SmsNotifier implements Notifier { }
+class SmsNotifier implements Notifier {}
 
 @Service
-public class NotificationService {
-    @Autowired
-    @Qualifier("emailNotifier")
-    private Notifier notifier;
+class NotificationService {
+    private final Notifier notifier;
+
+    NotificationService(@Qualifier("emailNotifier") Notifier notifier) {
+        this.notifier = notifier;
+    }
 }
 ```
+
+**Alternative:** Mark one implementation as `@Primary` and use `@Qualifier` only for explicit overrides.
 
 ---
 
@@ -161,35 +173,44 @@ public class NotificationService {
 <a id="q7"></a>
 ### Q7: What are the advantages of Spring Boot?
 **Answer:**
-1. **Auto-configuration**: Automatically configures based on classpath
-2. **Starter dependencies**: Simplified dependency management
-3. **Embedded servers**: No need to deploy WAR files
-4. **Production-ready features**: Health checks, metrics, externalized config
-5. **No XML configuration**: Java-based configuration
-6. **Opinionated defaults**: Convention over configuration
+Spring Boot optimizes developer productivity while keeping Spring ecosystem power.
+
+Key advantages:
+1. Auto-configuration based on classpath + properties.
+2. Starter dependencies reduce version-management friction.
+3. Embedded server support (jar deployment).
+4. Externalized configuration by profile/environment.
+5. Production features via Actuator (health, metrics, info).
+6. Convention-over-configuration for faster onboarding.
+
+**Trade-off:** Defaults are productive, but teams must still understand what Boot auto-configured under the hood.
 
 <a id="q8"></a>
 ### Q8: What is Spring Boot Auto-configuration?
 **Answer:**
-Auto-configuration automatically configures Spring beans based on classpath, existing beans, and properties.
+Auto-configuration conditionally creates beans using rules such as:
+- `@ConditionalOnClass`
+- `@ConditionalOnMissingBean`
+- `@ConditionalOnProperty`
 
 ```java
-// Conditional annotations used internally
-@ConditionalOnClass(DataSource.class)
-@ConditionalOnMissingBean(DataSource.class)
-@ConditionalOnProperty(name = "spring.datasource.url")
-
-// Disable specific auto-configuration
-@SpringBootApplication(exclude = {DataSourceAutoConfiguration.class})
+@SpringBootApplication(exclude = DataSourceAutoConfiguration.class)
+public class App {}
 ```
+
+**How to debug it:** use `--debug` or inspect condition evaluation report to see why a bean was or was not created.
+
+**Best practice:** Prefer overriding with your own bean rather than blindly excluding large auto-config modules.
 
 <a id="q9"></a>
 ### Q9: What is the difference between application.properties and application.yml?
 **Answer:**
+Both define externalized config; they are functionally equivalent in Spring Boot.
+
 ```properties
 # application.properties
 server.port=8080
-spring.datasource.url=jdbc:mysql://localhost/db
+spring.datasource.url=jdbc:postgresql://localhost:5432/app
 ```
 
 ```yaml
@@ -198,10 +219,15 @@ server:
   port: 8080
 spring:
   datasource:
-    url: jdbc:mysql://localhost/db
+    url: jdbc:postgresql://localhost:5432/app
 ```
 
-YAML advantages: hierarchical structure, less repetition, supports lists naturally.
+| `properties` | `yml` |
+|--------------|-------|
+| Verbose for nested values | Cleaner for nested structures/lists |
+| Familiar Java style | More concise but indentation-sensitive |
+
+Choose one style consistently in a codebase.
 
 ---
 
@@ -210,57 +236,77 @@ YAML advantages: hierarchical structure, less repetition, supports lists natural
 <a id="q10"></a>
 ### Q10: What is a Spring Bean?
 **Answer:**
-A Bean is an object managed by the Spring IoC container. Spring handles instantiation, dependency injection, lifecycle management, and destruction.
+A Spring Bean is an object managed by the IoC container, including creation, wiring, lifecycle, and optional proxying.
+
+Not every Java object is a bean; only objects registered in context (`@Component`, `@Bean`, XML, etc.) are container-managed.
 
 <a id="q11"></a>
 ### Q11: What are the Bean scopes in Spring?
 **Answer:**
-| Scope | Description |
-|-------|-------------|
-| singleton (default) | One instance per Spring container |
-| prototype | New instance each time requested |
-| request | One instance per HTTP request |
-| session | One instance per HTTP session |
-| application | One instance per ServletContext |
+| Scope | Meaning | Notes |
+|-------|---------|-------|
+| `singleton` (default) | One instance per container | Shared across requests; must be thread-safe |
+| `prototype` | New instance per lookup | Container does not fully manage destroy phase |
+| `request` | One per HTTP request | Web context only |
+| `session` | One per HTTP session | Web context only |
+| `application` | One per servlet context | Web context only |
+| `websocket` | One per WebSocket session | Web context only |
+
+**Pitfall:** Injecting `prototype` into `singleton` directly yields one instance at construction time unless using providers/object factories.
 
 <a id="q12"></a>
 ### Q12: What is the Bean lifecycle?
 **Answer:**
-1. Instantiation
-2. Populate properties (DI)
-3. BeanNameAware, BeanFactoryAware, ApplicationContextAware
-4. BeanPostProcessor.postProcessBeforeInitialization()
-5. @PostConstruct
-6. InitializingBean.afterPropertiesSet()
-7. Custom init-method
-8. BeanPostProcessor.postProcessAfterInitialization()
-9. Bean ready to use
-10. @PreDestroy
-11. DisposableBean.destroy()
-12. Custom destroy-method
+Typical lifecycle (simplified):
+1. Bean definition registered.
+2. Bean instantiated.
+3. Dependencies injected.
+4. `BeanNameAware` / `BeanFactoryAware` callbacks.
+5. `BeanPostProcessor#postProcessBeforeInitialization`.
+6. Init callbacks (`@PostConstruct`, `InitializingBean`, custom init method).
+7. `BeanPostProcessor#postProcessAfterInitialization` (proxy may be returned here).
+8. Bean ready for use.
+9. On shutdown: `@PreDestroy`, `DisposableBean`, custom destroy method.
+
+```java
+@Component
+class Client {
+    @PostConstruct
+    void init() {}
+
+    @PreDestroy
+    void cleanup() {}
+}
+```
 
 <a id="q13"></a>
 ### Q13: What are the different ways to define a bean in Spring?
 **Answer:**
+1. **Component scanning**
 ```java
-// 1. Component Scanning
-@Component  // or @Service, @Repository, @Controller
-public class UserService { }
+@Service
+class UserService {}
+```
 
-// 2. @Bean in @Configuration class
+2. **Java config with `@Bean`**
+```java
 @Configuration
-public class AppConfig {
+class AppConfig {
     @Bean
-    public UserService userService() {
-        return new UserService(userRepository());
+    UserService userService(UserRepository repo) {
+        return new UserService(repo);
     }
 }
-
-// 3. @Import for modular configuration
-@Configuration
-@Import({DatabaseConfig.class, SecurityConfig.class})
-public class AppConfig { }
 ```
+
+3. **Import modular configs**
+```java
+@Configuration
+@Import({DbConfig.class, SecurityConfig.class})
+class AppConfig {}
+```
+
+4. **Functional/Programmatic registration** (advanced bootstrap cases).
 
 ---
 
@@ -269,26 +315,29 @@ public class AppConfig { }
 <a id="q14"></a>
 ### Q14: What is AOP and what are its key concepts?
 **Answer:**
-AOP allows separation of cross-cutting concerns (logging, security, transactions) from business logic.
+AOP separates cross-cutting concerns (logging, security, transactions, tracing) from core business logic.
 
-**Key concepts:**
-- **Aspect**: Module containing cross-cutting concern code
-- **Join Point**: Point in execution (method call, exception)
-- **Pointcut**: Expression that matches join points
-- **Advice**: Action taken at join point
-- **Weaving**: Linking aspects with target objects
+| Concept | Meaning |
+|---------|---------|
+| Aspect | Module containing cross-cutting logic |
+| Join point | Interceptable execution point (Spring AOP: method execution) |
+| Pointcut | Expression selecting join points |
+| Advice | Action around join points (`@Before`, `@Around`, etc.) |
+| Weaving | Applying aspect logic to target |
 
 ```java
 @Aspect
 @Component
-public class LoggingAspect {
-    @Around("execution(* com.example.service.*.*(..))")
-    public Object logExecutionTime(ProceedingJoinPoint joinPoint) throws Throwable {
-        long start = System.currentTimeMillis();
-        Object result = joinPoint.proceed();
-        log.info("{} executed in {}ms", joinPoint.getSignature(), 
-                 System.currentTimeMillis() - start);
-        return result;
+class TimingAspect {
+    @Around("execution(* com.example.service..*(..))")
+    public Object time(ProceedingJoinPoint pjp) throws Throwable {
+        long start = System.nanoTime();
+        try {
+            return pjp.proceed();
+        } finally {
+            long tookMs = (System.nanoTime() - start) / 1_000_000;
+            System.out.println(pjp.getSignature() + " took " + tookMs + "ms");
+        }
     }
 }
 ```
@@ -296,61 +345,56 @@ public class LoggingAspect {
 <a id="q15"></a>
 ### Q15: What are the types of Advice in Spring AOP?
 **Answer:**
-| Advice | Execution |
+| Advice | Runs when |
 |--------|-----------|
-| @Before | Before method execution |
-| @After | After method (regardless of outcome) |
-| @AfterReturning | After successful return |
-| @AfterThrowing | After exception thrown |
-| @Around | Wraps method, full control |
+| `@Before` | before target method |
+| `@After` | after target method (success or exception) |
+| `@AfterReturning` | after successful return |
+| `@AfterThrowing` | after exception |
+| `@Around` | wraps call and controls invocation |
+
+**Guideline:** Use `@Around` only when you need full control (timing/retry/short-circuit); otherwise prefer narrower advice.
 
 <a id="q16"></a>
 ### Q16: What is the difference between Spring AOP and AspectJ?
 **Answer:**
 | Feature | Spring AOP | AspectJ |
 |---------|------------|---------|
-| Weaving | Runtime (proxy-based) | Compile-time or load-time |
-| Join points | Method execution only | Methods, fields, constructors |
-| Scope | Spring beans only | Any Java class |
-| Self-invocation | Not intercepted | Works correctly |
+| Weaving | Runtime proxies | Compile-time or load-time weaving |
+| Join points | Method execution on Spring beans | Methods, constructors, fields, more |
+| Scope | Container-managed beans only | Any class |
+| Self-invocation | Not intercepted by proxy | Can be intercepted |
+| Complexity | Simpler operationally | More power, more setup |
 
-```java
-// Self-invocation problem in Spring AOP
-@Service
-public class OrderService {
-    @Transactional
-    public void createOrder() {
-        processPayment();  // DOES NOT trigger @Transactional (bypasses proxy)
-    }
-    
-    @Transactional
-    public void processPayment() { }
-}
-```
+Use Spring AOP for most enterprise cross-cutting concerns; choose AspectJ when you need non-proxy join points.
 
 <a id="q17"></a>
 ### Q17: How do you write a pointcut expression?
 **Answer:**
+Common forms:
+
 ```java
-// Any method in service package
-@Before("execution(* com.example.service.*.*(..))")
+// Any method in service package and subpackages
+@Before("execution(* com.example.service..*(..))")
+public void beforeServiceMethods() {}
 
-// Methods with @Transactional annotation
+// Methods annotated with @Transactional
 @Before("@annotation(org.springframework.transaction.annotation.Transactional)")
+public void beforeTransactionalMethods() {}
 
-// All methods in classes annotated with @Service
+// Beans with @Service stereotype
 @Before("@within(org.springframework.stereotype.Service)")
+public void beforeServiceBeans() {}
 
-// Specific bean
-@Before("bean(userService)")
-
-// Combining pointcuts
-@Pointcut("execution(* com.example.service.*.*(..))")
-public void serviceLayer() { }
+// Composition
+@Pointcut("execution(* com.example.service..*(..))")
+private void serviceLayer() {}
 
 @Before("serviceLayer() && args(userId, ..)")
-public void beforeServiceWithUserId(Long userId) { }
+public void audit(Long userId) {}
 ```
+
+**Best practice:** Keep pointcuts centralized and named; avoid fragile copy-paste strings across aspects.
 
 ---
 
@@ -359,42 +403,65 @@ public void beforeServiceWithUserId(Long userId) { }
 <a id="q18"></a>
 ### Q18: How does @Transactional work?
 **Answer:**
-Spring creates a proxy that:
-1. Opens a transaction before method execution
-2. Commits if method completes successfully
-3. Rolls back if RuntimeException is thrown
+`@Transactional` is usually applied through a proxy around your bean method:
+1. Proxy starts/joins transaction before method call.
+2. Target method executes.
+3. Proxy commits on success.
+4. Proxy rolls back based on rollback rules on failure.
 
 ```java
-@Transactional
-public void transferMoney(Long fromId, Long toId, BigDecimal amount) {
-    accountRepository.debit(fromId, amount);
-    accountRepository.credit(toId, amount);
-    // Both operations in same transaction
+@Service
+class TransferService {
+    @Transactional
+    public void transfer(Long from, Long to, BigDecimal amount) {
+        debit(from, amount);
+        credit(to, amount);
+    }
 }
 ```
 
-**Key attributes:** `propagation`, `isolation`, `rollbackFor`, `readOnly`
+**Important default:** rollback occurs for unchecked exceptions (`RuntimeException`, `Error`) unless configured otherwise.
 
 <a id="q19"></a>
 ### Q19: What are Transaction Propagation levels?
 **Answer:**
 | Propagation | Behavior |
 |-------------|----------|
-| REQUIRED (default) | Join existing or create new |
-| REQUIRES_NEW | Always create new, suspend existing |
-| SUPPORTS | Join existing, or run without if none |
-| NOT_SUPPORTED | Run without transaction, suspend existing |
-| MANDATORY | Must have existing, else exception |
-| NEVER | Must not have existing, else exception |
-| NESTED | Nested transaction with savepoint |
+| `REQUIRED` | Join current tx or create one (default) |
+| `REQUIRES_NEW` | Suspend current tx and start a new one |
+| `SUPPORTS` | Use current tx if present, else non-transactional |
+| `NOT_SUPPORTED` | Run non-transactional, suspending existing tx |
+| `MANDATORY` | Require an existing tx, else error |
+| `NEVER` | Must run without tx, else error |
+| `NESTED` | Nested tx via savepoint (manager-dependent) |
+
+**Rule of thumb:** Use `REQUIRES_NEW` sparingly; it changes failure semantics and can surprise callers.
 
 <a id="q20"></a>
 ### Q20: Why might @Transactional not work?
 **Answer:**
-1. **Self-invocation**: Calling @Transactional method from same class (proxy bypass)
-2. **Not public**: Spring proxies only work with public methods
-3. **Wrong exception**: By default, only unchecked exceptions roll back
-4. **Proxy mode**: JDK proxy requires interface, CGLIB for classes
+Common causes:
+1. **Self-invocation**: method in same class bypasses proxy.
+2. **Wrong visibility/finality**: proxy cannot intercept as expected (`private`, `final`, etc., depending on proxy type).
+3. **Called outside Spring context**: object manually created with `new`.
+4. **Wrong exception expectations**: checked exceptions do not roll back by default.
+5. **Async boundary**: transaction context does not automatically flow to new thread.
+6. **Misconfigured transaction manager**: incorrect datasource/manager wiring.
+
+```java
+@Service
+class OrderService {
+    @Transactional
+    public void createOrder() {
+        validate(); // self-invocation issue if validate is expected transactional separately
+    }
+
+    @Transactional
+    public void validate() {}
+}
+```
+
+**Fix patterns:** split methods into separate beans, ensure proxy-managed calls, and set `rollbackFor` intentionally when needed.
 
 ---
 
