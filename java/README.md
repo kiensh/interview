@@ -11,12 +11,13 @@ A comprehensive collection of Java and Spring Framework interview questions orga
 | [concurrency.md](concurrency.md) | Threads, Synchronization, Thread Pools, Executors, Atomic, Memory | 24 |
 | [jvm.md](jvm.md) | JVM Architecture, ClassLoader, Memory Areas, Execution Engine, GC, Security | 27 |
 | [modern-java.md](modern-java.md) | Streams, Functional Programming, Java 8/11/17 Features | 11 |
-| [spring-core.md](spring-core.md) | DI, IoC, Annotations, Boot, Bean Lifecycle, AOP, Transactions | 20 |
-| [spring-web-data.md](spring-web-data.md) | JPA, JDBC, Hibernate, WebFlux, Security | 16 |
+| [spring-core.md](spring-core.md) | DI, IoC, Annotations, Boot, Bean Lifecycle, AOP, Transaction pitfalls | 18 |
+| [spring-data.md](spring-data.md) | JPA, JDBC, Hibernate, Transactions, Locking, Performance | 15 |
+| [spring-web-security.md](spring-web-security.md) | WebFlux, Reactive streams, Spring Security, JWT, CORS | 9 |
 | [testing.md](testing.md) | JUnit, Mockito, Spring Boot Testing, Test Slices | 15 |
 | [tools.md](tools.md) | Maven, Gradle, Logging (SLF4J/Logback), Task Scheduling | 10 |
 
-**Total: 162 Questions**
+**Total: 168 Questions**
 
 ---
 

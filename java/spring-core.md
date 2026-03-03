@@ -30,9 +30,7 @@
 - [Q17: How do you write a pointcut expression?](#q17)
 
 ### Transactions
-- [Q18: How does @Transactional work?](#q18)
-- [Q19: What are Transaction Propagation levels?](#q19)
-- [Q20: Why might @Transactional not work?](#q20)
+- [Q18: Why might @Transactional not work?](#q18)
 
 ---
 
@@ -401,44 +399,7 @@ public void audit(Long userId) {}
 ## Transactions
 
 <a id="q18"></a>
-### Q18: How does @Transactional work?
-**Answer:**
-`@Transactional` is usually applied through a proxy around your bean method:
-1. Proxy starts/joins transaction before method call.
-2. Target method executes.
-3. Proxy commits on success.
-4. Proxy rolls back based on rollback rules on failure.
-
-```java
-@Service
-class TransferService {
-    @Transactional
-    public void transfer(Long from, Long to, BigDecimal amount) {
-        debit(from, amount);
-        credit(to, amount);
-    }
-}
-```
-
-**Important default:** rollback occurs for unchecked exceptions (`RuntimeException`, `Error`) unless configured otherwise.
-
-<a id="q19"></a>
-### Q19: What are Transaction Propagation levels?
-**Answer:**
-| Propagation | Behavior |
-|-------------|----------|
-| `REQUIRED` | Join current tx or create one (default) |
-| `REQUIRES_NEW` | Suspend current tx and start a new one |
-| `SUPPORTS` | Use current tx if present, else non-transactional |
-| `NOT_SUPPORTED` | Run non-transactional, suspending existing tx |
-| `MANDATORY` | Require an existing tx, else error |
-| `NEVER` | Must run without tx, else error |
-| `NESTED` | Nested tx via savepoint (manager-dependent) |
-
-**Rule of thumb:** Use `REQUIRES_NEW` sparingly; it changes failure semantics and can surprise callers.
-
-<a id="q20"></a>
-### Q20: Why might @Transactional not work?
+### Q18: Why might @Transactional not work?
 **Answer:**
 Common causes:
 1. **Self-invocation**: method in same class bypasses proxy.
